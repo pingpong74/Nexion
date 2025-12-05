@@ -175,7 +175,7 @@ impl InnerPipelineManager {
 
         //Brrr
         let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
-            .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
+            .topology(raster_pipeline_desc.topology.to_vk())
             .primitive_restart_enable(false);
 
         let viewport_state = vk::PipelineViewportStateCreateInfo::default().viewport_count(1).scissor_count(1);

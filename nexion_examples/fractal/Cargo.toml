@@ -6,5 +6,5 @@ edition = "2024"
 [dependencies]
 winit = "*"
 bytemuck = "*"
-vulcany = { path = "../../vulcany"}
+nexion = { path = "../../nexion"}
 cgmath = "*"

@@ -188,6 +188,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexion"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "ash",
+ "bytemuck",
+ "crossbeam",
+ "delegate",
+ "memoffset",
+ "raw-window-handle",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "vk-mem",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -304,23 +321,6 @@ dependencies = [
  "ash",
  "bitflags",
  "cc",
-]
-
-[[package]]
-name = "vulcany"
-version = "0.1.0"
-dependencies = [
- "ahash",
- "ash",
- "bytemuck",
- "crossbeam",
- "delegate",
- "memoffset",
- "raw-window-handle",
- "serde",
- "serde_json",
- "smallvec",
- "vk-mem",
 ]
 
 [[package]]

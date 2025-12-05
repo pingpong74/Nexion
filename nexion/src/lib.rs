@@ -12,6 +12,10 @@ pub use taskgraph::{definations::*, task_graph::*};
 pub use bytemuck;
 pub use memoffset;
 
+// For copying the nexion.slang file to your directory.
+
+pub fn add_shader_directory(paths: &str) {}
+
 //Macros here
 //
 // Vertex macro

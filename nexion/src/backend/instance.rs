@@ -23,12 +23,12 @@ pub(crate) struct QueueFamilyIndices {
     pub compute_family: Option<u32>,
 }
 
-pub(crate) struct PhysicalDevice<'a> {
+pub(crate) struct PhysicalDevice {
     pub handle: vk::PhysicalDevice,
     pub swapchain_support: SwapchainSupport,
     pub queue_families: QueueFamilyIndices,
-    pub properties: vk::PhysicalDeviceProperties2<'a>,
-    pub rt_props: vk::PhysicalDeviceRayTracingPipelinePropertiesKHR<'a>,
+    pub properties: vk::PhysicalDeviceProperties2<'static>,
+    //pub rt_props: vk::PhysicalDeviceRayTracingPipelinePropertiesKHR<'a>,
 }
 
 pub(crate) struct InnerInstance {
@@ -154,6 +154,7 @@ impl InnerInstance {
 
         // Existing common features
         let features = vk::PhysicalDeviceFeatures::default().shader_int64(true);
+        let mut float_atomic_features = vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT::default().shader_buffer_float32_atomic_add(true);
 
         let mut dynamic_rendering_features = vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
 
@@ -193,6 +194,10 @@ impl InnerInstance {
             ray_query_features = ray_query_features.ray_query(true);
         }
 
+        if device_desc.atomic_float_operations {
+            device_extensions.push(ash::ext::shader_atomic_float::NAME.as_ptr());
+        }
+
         // ----> Build final feature2 chain <----
         let mut features2 = vk::PhysicalDeviceFeatures2::default()
             .push_next(&mut indexing_features)
@@ -206,6 +211,10 @@ impl InnerInstance {
         // Add ray tracing feature structs *only if* enabled
         if device_desc.ray_tracing {
             features2 = features2.push_next(&mut accel_struct_features).push_next(&mut rt_pipeline_features).push_next(&mut ray_query_features);
+        }
+
+        if device_desc.atomic_float_operations {
+            features2 = features2.push_next(&mut float_atomic_features);
         }
 
         let create_info = vk::DeviceCreateInfo::default()
@@ -239,7 +248,7 @@ impl InnerInstance {
 
 //Surface creation
 impl InnerInstance {
-    unsafe fn create_surface<W: HasDisplayHandle + HasWindowHandle>(entry: &ash::Entry, instance: &ash::Instance, window: &Arc<W>) -> Surface {
+    unsafe fn create_surface<W: HasDisplayHandle + HasWindowHandle>(entry: &ash::Entry, instance: &ash::Instance, window: &W) -> Surface {
         let raw_window = window.window_handle().unwrap().as_raw();
         let raw_display = window.display_handle().unwrap().as_raw();
 
@@ -367,8 +376,7 @@ impl InnerInstance {
         let mut best_device: Option<(i32, PhysicalDevice)> = None;
 
         for device in devices {
-            let mut rt_props: vk::PhysicalDeviceRayTracingPipelinePropertiesKHR = Default::default();
-            let mut props: vk::PhysicalDeviceProperties2 = vk::PhysicalDeviceProperties2::default().push_next(&mut rt_props);
+            let mut props: vk::PhysicalDeviceProperties2 = vk::PhysicalDeviceProperties2::default();
             unsafe {
                 self.handle.get_physical_device_properties2(device, &mut props);
             };
@@ -389,14 +397,14 @@ impl InnerInstance {
                 let score = score + props.properties.limits.max_image_dimension2_d as i32;
 
                 let owned_props = props; // Copy, no pNext
-                let owned_rt_props = rt_props;
+                //let owned_rt_props = rt_props;
 
                 let candidate = PhysicalDevice {
                     handle: device,
                     swapchain_support: sc,
                     queue_families: qf,
                     properties: owned_props,
-                    rt_props: owned_rt_props,
+                    //rt_props: owned_rt_props,
                 };
 
                 if let Some((best_score, _)) = &best_device {

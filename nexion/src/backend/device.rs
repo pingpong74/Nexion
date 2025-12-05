@@ -19,7 +19,7 @@ use vk_mem::*;
 pub(crate) struct InnerDevice {
     pub(crate) allocator: Allocator,
     pub(crate) handle: ash::Device,
-    pub(crate) physical_device: PhysicalDevice<'static>,
+    pub(crate) physical_device: PhysicalDevice,
     pub(crate) instance: Arc<InnerInstance>,
 
     //Pools for various gpu resources
@@ -141,9 +141,17 @@ impl InnerDevice {
 // Buffer //
 impl InnerDevice {
     pub(crate) fn create_buffer(&self, buffer_desc: &BufferDescription) -> BufferID {
+        let indices = [
+            self.physical_device.queue_families.compute_family.unwrap(),
+            self.physical_device.queue_families.graphics_family.unwrap(),
+            self.physical_device.queue_families.transfer_family.unwrap(),
+        ];
+
         let buffer_create_info = vk::BufferCreateInfo::default()
             .usage(buffer_desc.usage.to_vk_flag() | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS)
-            .size(buffer_desc.size);
+            .size(buffer_desc.size)
+            .sharing_mode(vk::SharingMode::CONCURRENT)
+            .queue_family_indices(&indices);
 
         let mut allocation_create_info = vk_mem::AllocationCreateInfo {
             usage: buffer_desc.memory_type.to_vk_flag(),

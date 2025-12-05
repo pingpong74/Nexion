@@ -241,8 +241,8 @@ impl GpuBindlessDescriptorPool {
         let write_info = [vk::WriteDescriptorSet::default()
             .buffer_info(&buffer_info)
             .dst_set(self.set)
-            .dst_binding(index)
-            .dst_array_element(0)
+            .dst_binding(0)
+            .dst_array_element(index)
             .descriptor_count(1)
             .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)];
 

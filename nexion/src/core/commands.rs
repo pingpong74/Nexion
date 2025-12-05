@@ -5,8 +5,8 @@ use ash::vk;
 use smallvec::SmallVec;
 
 use crate::{
-    Barrier, BlitInfo, BufferCopyInfo, BufferID, BufferImageCopyInfo, CommandBufferUsage, DispatchIndirectInfo, DispatchInfo, ImageCopyInfo, ImageID, ImageViewID, IndexType, Pipeline, QueueType,
-    RenderingBeginInfo, backend::device::InnerDevice,
+    Barrier, BlitInfo, BufferCopyInfo, BufferFillInfo, BufferID, BufferImageCopyInfo, CommandBufferUsage, DispatchIndirectInfo, DispatchInfo, DrawIndexedIndirectCountInfo, DrawIndexedIndirectInfo,
+    DrawIndirectCountInfo, DrawIndirectInfo, ImageCopyInfo, ImageID, ImageViewID, IndexType, Pipeline, QueueType, RenderingBeginInfo, backend::device::InnerDevice,
 };
 
 /// Not thread safe!!
@@ -199,7 +199,6 @@ impl CommandRecorder {
 
     pub fn bind_pipeline(&self, pipeline: &impl Pipeline) {
         unsafe {
-            self.device.handle.cmd_bind_pipeline(self.current_commad_buffer, pipeline.get_bind_point(), pipeline.get_handle());
             self.device.handle.cmd_bind_descriptor_sets(
                 self.current_commad_buffer,
                 pipeline.get_bind_point(),
@@ -208,6 +207,7 @@ impl CommandRecorder {
                 &[self.device.bindless_descriptors.set],
                 &[],
             );
+            self.device.handle.cmd_bind_pipeline(self.current_commad_buffer, pipeline.get_bind_point(), pipeline.get_handle());
         }
     }
 
@@ -240,6 +240,49 @@ impl CommandRecorder {
             self.device
                 .handle
                 .cmd_draw_indexed(self.current_commad_buffer, index_count, instance_count, first_index, vertex_offset, first_instance);
+        }
+    }
+
+    pub fn draw_indirect(&mut self, info: &DrawIndirectInfo) {
+        let buf = self.check_and_remeber_buffer_id(info.buffer);
+        unsafe {
+            self.device.handle.cmd_draw_indirect(self.current_commad_buffer, buf, info.offset, info.draw_count, info.stride);
+        }
+    }
+
+    //// ------------------------------------------------
+    //// 2. vkCmdDrawIndexedIndirect
+    //// ------------------------------------------------
+    pub fn draw_indexed_indirect(&mut self, info: &DrawIndexedIndirectInfo) {
+        let buf = self.check_and_remeber_buffer_id(info.buffer);
+        unsafe {
+            self.device.handle.cmd_draw_indexed_indirect(self.current_commad_buffer, buf, info.offset, info.draw_count, info.stride);
+        }
+    }
+
+    //// ------------------------------------------------
+    //// 3. vkCmdDrawIndirectCount
+    //// ------------------------------------------------
+    pub fn draw_indirect_count(&mut self, info: &DrawIndirectCountInfo) {
+        let buf = self.check_and_remeber_buffer_id(info.buffer);
+        let count_buf = self.check_and_remeber_buffer_id(info.count_buffer);
+        unsafe {
+            self.device
+                .handle
+                .cmd_draw_indirect_count(self.current_commad_buffer, buf, info.offset, count_buf, info.count_offset, info.max_draw_count, info.stride);
+        }
+    }
+
+    //// ------------------------------------------------
+    //// 4. vkCmdDrawIndexedIndirectCount
+    //// ------------------------------------------------
+    pub fn draw_indexed_indirect_count(&mut self, info: &DrawIndexedIndirectCountInfo) {
+        let buf = self.check_and_remeber_buffer_id(info.buffer);
+        let count_buf = self.check_and_remeber_buffer_id(info.count_buffer);
+        unsafe {
+            self.device
+                .handle
+                .cmd_draw_indexed_indirect_count(self.current_commad_buffer, buf, info.offset, count_buf, info.count_offset, info.max_draw_count, info.stride);
         }
     }
 
@@ -334,6 +377,14 @@ impl CommandRecorder {
 
         unsafe {
             self.device.handle.cmd_copy_buffer2(self.current_commad_buffer, &copy_info);
+        }
+    }
+
+    pub fn fill_buffer(&mut self, info: &BufferFillInfo) {
+        let buffer = self.check_and_remeber_buffer_id(info.buffer);
+
+        unsafe {
+            self.device.handle.cmd_fill_buffer(self.current_commad_buffer, buffer, info.offset, info.size, info.data);
         }
     }
 
@@ -531,6 +582,7 @@ impl Drop for CommandRecorder {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct ExecutableCommandBuffer {
     pub(crate) handle: vk::CommandBuffer,
     pub(crate) queue_type: QueueType,

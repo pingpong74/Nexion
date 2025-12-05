@@ -1,5 +1,5 @@
+use nexion::{utils::vulkan_context::*, *};
 use std::sync::Arc;
-use vulcany::{utils::vulkan_context::*, *};
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::camera::Camera;
@@ -36,11 +36,13 @@ impl Renderer {
             &InstanceDescription {
                 api_version: ApiVersion::VkApi1_3,
                 enable_validation_layers: false,
-                window: window.clone(),
+                window: &window,
             },
             &DeviceDescription {
                 use_compute_queue: true,
                 use_transfer_queue: true,
+                ray_tracing: false,
+                atomic_float_operations: false,
             },
             &SwapchainDescription {
                 image_count: 3,

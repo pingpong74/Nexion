@@ -1,5 +1,5 @@
 [package]
-name = "vulcany"
+name = "nexion"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -7,7 +7,7 @@ keywords = ["graphics", "vulkan"]
 exclude = ["/examples", "/.cache"]
 description = "A high performance vulkan abstraction layer"
 readme = "Readme.md"
-repository = "https://github.com/pingpong74/Vulcany"
+repository = "https://github.com/pingpong74/Nexion"
 
 [dependencies]
 ash                 = { version = "0.38.0", features = ["linked"] }

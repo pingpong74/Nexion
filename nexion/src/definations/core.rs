@@ -11,10 +11,10 @@ pub enum ApiVersion {
 
 /// High level abstraction for instance creation
 /// Surface gets created along with the instance
-pub struct InstanceDescription<W: HasDisplayHandle + HasWindowHandle> {
+pub struct InstanceDescription<'a, W: HasDisplayHandle + HasWindowHandle> {
     pub api_version: ApiVersion,
     pub enable_validation_layers: bool,
-    pub window: Arc<W>,
+    pub window: &'a W,
 }
 
 /// Very high level abstraction for device creation
@@ -22,6 +22,7 @@ pub struct InstanceDescription<W: HasDisplayHandle + HasWindowHandle> {
 pub struct DeviceDescription {
     pub use_compute_queue: bool,
     pub use_transfer_queue: bool,
+    pub atomic_float_operations: bool,
     pub ray_tracing: bool,
 }
 

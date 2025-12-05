@@ -1,5 +1,5 @@
+use nexion::*;
 use std::time::Instant;
-use vulcany::*;
 use winit::{
     application::ApplicationHandler, event::WindowEvent, event_loop::EventLoop, window::Window,
 };
@@ -48,13 +48,14 @@ impl VulkanApp {
         let instance = Instance::new(&InstanceDescription {
             api_version: ApiVersion::VkApi1_3,
             enable_validation_layers: true,
-            window: window.clone(),
+            window: &window,
         });
 
         let device = instance.create_device(&DeviceDescription {
             use_compute_queue: true,
             use_transfer_queue: true,
             ray_tracing: false,
+            atomic_float_operations: false,
         });
 
         let swapchain = device.create_swapchain(&SwapchainDescription {

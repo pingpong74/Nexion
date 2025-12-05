@@ -223,6 +223,43 @@ impl Default for RenderingBeginInfo {
     }
 }
 
+// Indirect draw
+#[derive(Clone, Copy)]
+pub struct DrawIndirectInfo {
+    pub buffer: BufferID,
+    pub offset: u64,
+    pub draw_count: u32,
+    pub stride: u32,
+}
+
+#[derive(Clone, Copy)]
+pub struct DrawIndexedIndirectInfo {
+    pub buffer: BufferID,
+    pub offset: u64,
+    pub draw_count: u32,
+    pub stride: u32,
+}
+
+#[derive(Clone, Copy)]
+pub struct DrawIndirectCountInfo {
+    pub buffer: BufferID,
+    pub offset: u64,
+    pub count_buffer: BufferID,
+    pub count_offset: u64,
+    pub max_draw_count: u32,
+    pub stride: u32,
+}
+
+#[derive(Clone, Copy)]
+pub struct DrawIndexedIndirectCountInfo {
+    pub buffer: BufferID,
+    pub offset: u64,
+    pub count_buffer: BufferID,
+    pub count_offset: u64,
+    pub max_draw_count: u32,
+    pub stride: u32,
+}
+
 // Compute
 #[derive(Clone, Debug)]
 pub struct DispatchInfo {
@@ -244,6 +281,13 @@ pub struct BufferCopyInfo {
     pub src_offset: u64,
     pub dst_offset: u64,
     pub size: u64,
+}
+
+pub struct BufferFillInfo {
+    pub buffer: BufferID,
+    pub offset: u64,
+    pub size: u64,
+    pub data: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -311,6 +355,7 @@ pub enum PipelineStage {
     ColorAttachmentOutput,
     Transfer,
     AllCommands,
+    VertexInput,
 }
 
 impl PipelineStage {
@@ -324,6 +369,7 @@ impl PipelineStage {
             PipelineStage::ColorAttachmentOutput => vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
             PipelineStage::Transfer => vk::PipelineStageFlags2::TRANSFER,
             PipelineStage::AllCommands => vk::PipelineStageFlags2::ALL_COMMANDS,
+            PipelineStage::VertexInput => vk::PipelineStageFlags2::VERTEX_INPUT,
         }
     }
 }
@@ -447,7 +493,7 @@ impl Default for BufferBarrier {
             src_queue: QueueType::None,
             dst_queue: QueueType::None,
             offset: 0,
-            size: 0,
+            size: vk::WHOLE_SIZE,
         };
     }
 }

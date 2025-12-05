@@ -257,6 +257,21 @@ impl ShaderStages {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum InputTopology {
+    TriangleList,
+    PointList,
+}
+
+impl InputTopology {
+    pub(crate) const fn to_vk(&self) -> vk::PrimitiveTopology {
+        match self {
+            InputTopology::TriangleList => vk::PrimitiveTopology::TRIANGLE_LIST,
+            InputTopology::PointList => vk::PrimitiveTopology::POINT_LIST,
+        }
+    }
+}
+
 impl BitOr for ShaderStages {
     type Output = Self;
     fn bitor(self, rhs: Self) -> Self {
@@ -285,6 +300,7 @@ impl Default for PushConstantsDescription {
 pub struct RasterizationPipelineDescription {
     pub vertex_input: VertexInputDescription,
     pub push_constants: PushConstantsDescription,
+    pub topology: InputTopology,
     pub vertex_shader_path: &'static str,
     pub fragment_shader_path: &'static str,
     pub cull_mode: CullMode,
@@ -300,6 +316,7 @@ impl Default for RasterizationPipelineDescription {
         Self {
             vertex_input: VertexInputDescription::default(),
             push_constants: PushConstantsDescription::default(),
+            topology: InputTopology::TriangleList,
             vertex_shader_path: " ",
             fragment_shader_path: " ",
             cull_mode: CullMode::None,

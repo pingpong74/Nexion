@@ -38,9 +38,12 @@ public struct ReadWriteBuffer<T> {
     return { rw_coherent_buffers[index] };
   }
 
-  public inline __subscript(uint index)->T {
-    get { return raw_buffer.Load<T>(index * sizeof(T)); }
-    set { raw_buffer.Store<T>(index * sizeof(T), newValue); }
+  public const inline T load(uint id) {
+    return raw_buffer.Load<T>(id * sizeof(T));
+  }
+
+  public inline void store(uint id, T new_value) {
+    raw_buffer.Store<T>(id * sizeof(T), new_value);
   }
 }
 

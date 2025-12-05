@@ -76,7 +76,7 @@ impl Pipeline for ComputePipeline {
         return self.inner.handle;
     }
     fn get_bind_point(&self) -> vk::PipelineBindPoint {
-        return vk::PipelineBindPoint::GRAPHICS;
+        return vk::PipelineBindPoint::COMPUTE;
     }
     fn get_layout(&self) -> vk::PipelineLayout {
         return self.inner.layout;
