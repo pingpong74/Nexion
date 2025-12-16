@@ -33,10 +33,10 @@ impl Renderer {
         let size = window.inner_size();
 
         let vk_context = VulkanContext::new(
+            &window,
             &InstanceDescription {
                 api_version: ApiVersion::VkApi1_3,
                 enable_validation_layers: false,
-                window: &window,
             },
             &DeviceDescription {
                 use_compute_queue: true,

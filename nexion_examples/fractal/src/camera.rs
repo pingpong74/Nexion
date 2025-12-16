@@ -77,8 +77,6 @@ impl CameraController {
         let forward_dir = (camera.target - camera.eye).normalize();
         let right_dir = forward_dir.cross(camera.up).normalize();
 
-        println!("{} {}", self.rotate_horizontal, self.rotate_vertical);
-
         if self.forward {
             camera.eye += forward_dir * self.speed * dt;
             camera.target += forward_dir * self.speed * dt;
