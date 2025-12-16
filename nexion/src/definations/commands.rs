@@ -224,6 +224,16 @@ impl Default for RenderingBeginInfo {
 }
 
 // Indirect draw
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct DrawIndirectCommand {
+    pub vertex_count: u32,
+    pub instance_count: u32,
+    pub first_vertex: u32,
+    pub first_instance: u32,
+}
+
 #[derive(Clone, Copy)]
 pub struct DrawIndirectInfo {
     pub buffer: BufferID,
@@ -347,29 +357,71 @@ pub struct BlitRegion {
 // Memory barriers
 #[derive(Clone, Copy, Debug)]
 pub enum PipelineStage {
+    // Sync2 "common" stages
+    None,
     TopOfPipe,
     BottomOfPipe,
-    VertexShader,
-    FragmentShader,
-    ComputeShader,
-    ColorAttachmentOutput,
-    Transfer,
-    AllCommands,
+    DrawIndirect,
     VertexInput,
+    VertexShader,
+    TessellationControlShader,
+    TessellationEvaluationShader,
+    GeometryShader,
+    FragmentShader,
+    EarlyFragmentTests,
+    LateFragmentTests,
+    ColorAttachmentOutput,
+    ComputeShader,
+    AllTransfer,
+    Transfer, // alias of Copy+Resolve+Blit+Clear (Vulkan defines a combined bit)
+    Copy,
+    Resolve,
+    Blit,
+    Clear,
+
+    // Acceleration structure + ray tracing stages
+    RayTracingShader,
+    AccelerationStructureBuild,
+    AccelerationStructureCopy,
+
+    // Host and general
+    Host,
+    AllGraphics,
+    AllCommands,
 }
 
 impl PipelineStage {
     pub const fn to_vk(&self) -> vk::PipelineStageFlags2 {
         match self {
+            PipelineStage::None => vk::PipelineStageFlags2::NONE,
             PipelineStage::TopOfPipe => vk::PipelineStageFlags2::TOP_OF_PIPE,
             PipelineStage::BottomOfPipe => vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
-            PipelineStage::VertexShader => vk::PipelineStageFlags2::VERTEX_SHADER,
-            PipelineStage::FragmentShader => vk::PipelineStageFlags2::FRAGMENT_SHADER,
-            PipelineStage::ComputeShader => vk::PipelineStageFlags2::COMPUTE_SHADER,
-            PipelineStage::ColorAttachmentOutput => vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-            PipelineStage::Transfer => vk::PipelineStageFlags2::TRANSFER,
-            PipelineStage::AllCommands => vk::PipelineStageFlags2::ALL_COMMANDS,
+            PipelineStage::DrawIndirect => vk::PipelineStageFlags2::DRAW_INDIRECT,
             PipelineStage::VertexInput => vk::PipelineStageFlags2::VERTEX_INPUT,
+            PipelineStage::VertexShader => vk::PipelineStageFlags2::VERTEX_SHADER,
+            PipelineStage::TessellationControlShader => vk::PipelineStageFlags2::TESSELLATION_CONTROL_SHADER,
+            PipelineStage::TessellationEvaluationShader => vk::PipelineStageFlags2::TESSELLATION_EVALUATION_SHADER,
+            PipelineStage::GeometryShader => vk::PipelineStageFlags2::GEOMETRY_SHADER,
+            PipelineStage::FragmentShader => vk::PipelineStageFlags2::FRAGMENT_SHADER,
+            PipelineStage::EarlyFragmentTests => vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS,
+            PipelineStage::LateFragmentTests => vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
+            PipelineStage::ColorAttachmentOutput => vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            PipelineStage::ComputeShader => vk::PipelineStageFlags2::COMPUTE_SHADER,
+
+            PipelineStage::AllTransfer => vk::PipelineStageFlags2::ALL_TRANSFER,
+            PipelineStage::Transfer => vk::PipelineStageFlags2::TRANSFER,
+            PipelineStage::Copy => vk::PipelineStageFlags2::COPY,
+            PipelineStage::Resolve => vk::PipelineStageFlags2::RESOLVE,
+            PipelineStage::Blit => vk::PipelineStageFlags2::BLIT,
+            PipelineStage::Clear => vk::PipelineStageFlags2::CLEAR,
+
+            PipelineStage::RayTracingShader => vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+            PipelineStage::AccelerationStructureBuild => vk::PipelineStageFlags2::ACCELERATION_STRUCTURE_BUILD_KHR,
+            PipelineStage::AccelerationStructureCopy => vk::PipelineStageFlags2::ACCELERATION_STRUCTURE_COPY_KHR,
+
+            PipelineStage::Host => vk::PipelineStageFlags2::HOST,
+            PipelineStage::AllGraphics => vk::PipelineStageFlags2::ALL_GRAPHICS,
+            PipelineStage::AllCommands => vk::PipelineStageFlags2::ALL_COMMANDS,
         }
     }
 }

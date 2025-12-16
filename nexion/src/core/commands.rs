@@ -39,11 +39,7 @@ impl CommandRecorder {
     pub fn begin_recording(&mut self, usage: CommandBufferUsage) {
         let begin_info = vk::CommandBufferBeginInfo::default().flags(usage.to_vk_flags());
 
-        if self.commad_buffers.is_empty() {
-            self.current_commad_buffer = self.new_cmd_buffer();
-        } else {
-            self.current_commad_buffer = self.commad_buffers.pop().unwrap();
-        }
+        self.current_commad_buffer = self.commad_buffers.pop().unwrap_or_else(|| self.new_cmd_buffer());
 
         unsafe {
             self.device.handle.begin_command_buffer(self.current_commad_buffer, &begin_info).expect("Failed to begin cmd buffer!!!");
@@ -527,39 +523,39 @@ impl CommandRecorder {
 
 impl CommandRecorder {
     fn check_and_remeber_image_id(&mut self, id: ImageID) -> vk::Image {
-        match self.remembered_image_ids.get(&id) {
-            Some(img) => img.clone(),
+        return match self.remembered_image_ids.get(&id) {
+            Some(img) => *img,
             None => {
                 let img_pool = self.device.image_pool.read().unwrap();
                 let img = img_pool.get_ref(id.id);
                 self.remembered_image_ids.insert(id, img.handle);
                 img.handle
             }
-        }
+        };
     }
 
     fn check_and_remeber_buffer_id(&mut self, id: BufferID) -> vk::Buffer {
-        match self.remembered_buffer_ids.get(&id) {
-            Some(buff) => buff.clone(),
+        return match self.remembered_buffer_ids.get(&id) {
+            Some(buff) => *buff,
             None => {
                 let buffer_pool = self.device.buffer_pool.read().unwrap();
                 let buffer = buffer_pool.get_ref(id.id);
                 self.remembered_buffer_ids.insert(id, buffer.handle);
                 buffer.handle
             }
-        }
+        };
     }
 
     fn check_and_remeber_image_view_id(&mut self, id: ImageViewID) -> vk::ImageView {
-        match self.remembered_image_view_ids.get(&id) {
-            Some(img_view) => img_view.clone(),
+        return match self.remembered_image_view_ids.get(&id) {
+            Some(img_view) => *img_view,
             None => {
                 let pool = self.device.image_view_pool.read().unwrap();
                 let img_view = pool.get_ref(id.id);
                 self.remembered_image_view_ids.insert(id, img_view.handle);
                 img_view.handle
             }
-        }
+        };
     }
 
     pub(crate) fn new_cmd_buffer(&self) -> vk::CommandBuffer {

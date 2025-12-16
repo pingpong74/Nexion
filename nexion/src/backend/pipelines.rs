@@ -320,7 +320,7 @@ impl InnerPipelineManager {
         return (pipeline, pipeline_layout);
     }
 
-    pub(crate) fn create_rt_pipeline(&self, desc: &RayTracingPipelineDescription) -> (vk::Pipeline, vk::PipelineLayout) {
+    /*pub(crate) fn create_rt_pipeline(&self, desc: &RayTracingPipelineDescription) -> (vk::Pipeline, vk::PipelineLayout) {
         let mut shader_stages: Vec<vk::PipelineShaderStageCreateInfo> = Vec::new();
         let mut hit_group_infos: Vec<vk::RayTracingShaderGroupCreateInfoKHR> = Vec::new();
         let mut shader_modules: Vec<vk::ShaderModule> = Vec::new();
@@ -453,16 +453,16 @@ impl InnerPipelineManager {
             .max_pipeline_ray_recursion_depth(2)
             .layout(pipeline_layout);
 
-        let pipeline = unsafe {
+        /*let pipeline = unsafe {
             match &self.device.rt {
                 Some(rt) => rt
                     .create_ray_tracing_pipelines(vk::DeferredOperationKHR::null(), vk::PipelineCache::null(), &[rt_pipeline_info], None)
                     .expect("Failed to create RT pipeline")[0],
                 None => panic!("Tried ray tracing without enabling ray tracing"),
             }
-        };
+        };*/
 
-        // Destroy all shader modules
+        let pipeline: vk::Pipeline = vk::Pipeline::null();
         for m in shader_modules {
             unsafe { self.device.handle.destroy_shader_module(m, None) };
         }
@@ -609,7 +609,7 @@ impl InnerPipelineManager {
             miss: miss_region,
             hit: hit_region,
         }
-    }
+    }*/
 }
 
 //// Helpers ////

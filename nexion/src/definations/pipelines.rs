@@ -77,6 +77,10 @@ impl VertexFormat for [u8; 4] {
     const FORMAT: Format = Format::Rgba8Unorm;
 }
 
+impl VertexFormat for u32 {
+    const FORMAT: Format = Format::R32Uint;
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum VertexInputRate {
     Vertex,

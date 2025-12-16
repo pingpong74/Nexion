@@ -254,7 +254,7 @@ impl GpuBindlessDescriptorPool {
     pub(crate) fn write_sampled_image(&self, device: &ash::Device, image_view: vk::ImageView, index: u32) {
         let sampler_info = [vk::DescriptorImageInfo {
             image_view: image_view,
-            image_layout: vk::ImageLayout::GENERAL,
+            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             sampler: vk::Sampler::null(),
         }];
 
@@ -308,7 +308,7 @@ impl GpuBindlessDescriptorPool {
             .dst_binding(3)
             .dst_array_element(index)
             .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)];
+            .descriptor_type(vk::DescriptorType::SAMPLER)];
 
         let copy_sets = [];
 

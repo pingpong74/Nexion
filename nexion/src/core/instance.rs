@@ -1,9 +1,5 @@
-use crate::backend::{
-    device::InnerDevice,
-    gpu_resources::{GpuBindlessDescriptorPool, GpuResourcePool},
-    instance::InnerInstance,
-};
-use std::sync::{Arc, RwLock};
+use crate::backend::{device::InnerDevice, instance::InnerInstance};
+use std::sync::Arc;
 
 use super::device::Device;
 
@@ -17,37 +13,13 @@ pub struct Instance {
 }
 
 impl Instance {
-    pub fn new<W: HasDisplayHandle + HasWindowHandle>(instance_desc: &InstanceDescription<W>) -> Instance {
-        let inner_instance = InnerInstance::new(instance_desc);
+    pub fn new<W: HasDisplayHandle + HasWindowHandle>(window: &W, instance_desc: &InstanceDescription) -> Instance {
+        let inner_instance = InnerInstance::new(window, instance_desc);
         return Instance { inner: Arc::new(inner_instance) };
     }
 
     pub fn create_device(&self, device_desc: &DeviceDescription) -> Device {
-        let (device, physical_device, allocator) = self.inner.create_device_data(device_desc);
-        let (graphics_queue, transfer_queue, compute_queue) = InnerInstance::create_queues(&device, &physical_device);
-        let bindless_desc = GpuBindlessDescriptorPool::new(&device, 100, 100, 100, 100);
-
-        return Device {
-            inner: Arc::new(InnerDevice {
-                handle: device,
-                physical_device: physical_device,
-                allocator: allocator,
-                instance: self.inner.clone(),
-
-                //Resource Pools
-                bindless_descriptors: bindless_desc,
-                buffer_pool: RwLock::new(GpuResourcePool::new()),
-                image_pool: RwLock::new(GpuResourcePool::new()),
-                image_view_pool: RwLock::new(GpuResourcePool::new()),
-                sampler_pool: RwLock::new(GpuResourcePool::new()),
-
-                //Queues
-                graphics_queue: graphics_queue,
-                transfer_queue: transfer_queue,
-                compute_queue: compute_queue,
-
-                rt: None,
-            }),
-        };
+        let inner_device = InnerDevice::new(device_desc, self.inner.clone());
+        return Device { inner: Arc::new(inner_device) };
     }
 }

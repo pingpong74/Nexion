@@ -13,10 +13,10 @@ pub struct VulkanContext {
 }
 
 impl VulkanContext {
-    pub fn new<W: HasDisplayHandle + HasWindowHandle>(instance_desc: &InstanceDescription<W>, device_desc: &DeviceDescription, swapchain_desc: &SwapchainDescription) -> VulkanContext {
-        let instance = Instance::new(instance_desc);
+    pub fn new<W: HasDisplayHandle + HasWindowHandle>(window: &W, instance_desc: &InstanceDescription, device_desc: &DeviceDescription, swapchain_desc: &SwapchainDescription) -> VulkanContext {
+        let instance = Instance::new(window, instance_desc);
         let device = instance.create_device(device_desc);
-        let swapchain = device.create_swapchain(swapchain_desc);
+        let swapchain = device.create_swapchain(window, swapchain_desc);
         let pipeline_manager = device.create_pipeline_manager();
 
         return VulkanContext {
@@ -31,15 +31,7 @@ impl VulkanContext {
 
 impl VulkanContext {
     pub fn resize(&mut self, width: u32, height: u32) {
-        self.wait_idle();
-        let d = SwapchainDescription {
-            width: width,
-            height: height,
-            image_count: self.swapchain_description.image_count,
-        };
-        let new_swapchain = self.device.recreate_swapchain(&d, &self.swapchain);
-        let old_swapchain = std::mem::replace(&mut self.swapchain, new_swapchain);
-        drop(old_swapchain);
+        self.swapchain.recreate_swapchain(width, height);
     }
 }
 
@@ -50,6 +42,7 @@ impl VulkanContext {
             pub fn create_buffer(&self, buffer_desc: &BufferDescription) -> BufferID;
             pub fn destroy_buffer(&self, id: BufferID);
             pub fn write_data_to_buffer<T: Copy>(&self, buffer_id: BufferID, data: &[T]);
+            pub fn get_raw_ptr(&self, buffer_id: BufferID) -> *mut u8;
             //Image
             pub fn create_image(&self, image_desc: &ImageDescription) -> ImageID;
             pub fn destroy_image(&self, image_id: ImageID);

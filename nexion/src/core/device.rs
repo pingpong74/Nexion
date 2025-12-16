@@ -1,6 +1,6 @@
 use ahash::{HashMap, HashMapExt};
 use ash::vk;
-use crossbeam::queue::ArrayQueue;
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use smallvec::smallvec;
 
 use crate::{
@@ -8,7 +8,7 @@ use crate::{
     QueueSubmitInfo, QueueType, SamplerDescription, SamplerID, SamplerWriteInfo, Semaphore, Swapchain, SwapchainDescription, TimelineSemaphore,
     backend::{device::InnerDevice, pipelines::InnerPipelineManager, swapchain::InnerSwapchain},
 };
-use std::sync::{Arc, atomic::AtomicUsize};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct Device {
@@ -17,63 +17,13 @@ pub struct Device {
 
 //Swapchain Impl//
 impl Device {
-    pub fn create_swapchain(&self, swapchain_desc: &SwapchainDescription) -> Swapchain {
-        let (loader, swapchain, images, image_views) = self.inner.create_swapchain_data(swapchain_desc, ash::vk::SwapchainKHR::null());
-
-        let (image_semapgores, present_semaphore) = {
-            let mut t: Vec<Semaphore> = vec![];
-            let mut n: Vec<Semaphore> = vec![];
-
-            for _ in 0..swapchain_desc.image_count {
-                t.push(self.create_binary_semaphore());
-                n.push(self.create_binary_semaphore());
-            }
-
-            (t, n)
-        };
+    pub fn create_swapchain<W: HasDisplayHandle + HasWindowHandle>(&self, window: &W, swapchain_desc: &SwapchainDescription) -> Swapchain {
+        let surface = unsafe { InnerSwapchain::create_surface(&self.inner, window) };
+        let inner_swapchain = InnerSwapchain::new(self.inner.clone(), &surface, swapchain_desc, None);
 
         return Swapchain {
-            inner: Arc::new(InnerSwapchain {
-                handle: swapchain,
-                swapchain_loader: loader,
-                curr_img_indeices: ArrayQueue::new(swapchain_desc.image_count as usize),
-                image_views: image_views,
-                images: images,
-                image_semaphore: image_semapgores,
-                preset_semaphore: present_semaphore,
-                timeline: AtomicUsize::new(0),
-                device: self.inner.clone(),
-            }),
-        };
-    }
-
-    pub fn recreate_swapchain(&self, swapchain_desc: &SwapchainDescription, old_swapchain: &Swapchain) -> Swapchain {
-        let (loader, swapchain, images, image_views) = self.inner.create_swapchain_data(swapchain_desc, old_swapchain.inner.handle);
-
-        let (image_semapgores, present_semaphore) = {
-            let mut t: Vec<Semaphore> = vec![];
-            let mut n: Vec<Semaphore> = vec![];
-
-            for _ in 0..swapchain_desc.image_count {
-                t.push(self.create_binary_semaphore());
-                n.push(self.create_binary_semaphore());
-            }
-
-            (t, n)
-        };
-
-        return Swapchain {
-            inner: Arc::new(InnerSwapchain {
-                handle: swapchain,
-                swapchain_loader: loader,
-                curr_img_indeices: ArrayQueue::new(swapchain_desc.image_count as usize),
-                image_views: image_views,
-                images: images,
-                image_semaphore: image_semapgores,
-                preset_semaphore: present_semaphore,
-                timeline: AtomicUsize::new(0),
-                device: self.inner.clone(),
-            }),
+            inner: Arc::new(inner_swapchain),
+            surface: Arc::new(surface),
         };
     }
 }
@@ -90,6 +40,10 @@ impl Device {
 
     pub fn write_data_to_buffer<T: Copy>(&self, buffer_id: BufferID, data: &[T]) {
         self.inner.write_data_to_buffer(buffer_id, data);
+    }
+
+    pub fn get_raw_ptr(&self, buffer_id: BufferID) -> *mut u8 {
+        return self.inner.get_raw_ptr(buffer_id);
     }
 }
 

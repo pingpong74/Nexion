@@ -1,10 +1,11 @@
-// module vulkany;
-
 #pragma once
 
-// Buffer stuff
-namespace vulcany {
+// Buffers
+namespace nexion {
 
+// -----------------------------------------
+// Read only Buffers
+// -----------------------------------------
 [[vk::binding(0, 0)]]
 ByteAddressBuffer ro_buffers[];
 
@@ -20,7 +21,9 @@ public struct ReadOnlyBuffer<T> {
   }
 }
 
-/// This manages Read write buffers
+// -----------------------------------------
+// Read write buffers
+// -----------------------------------------
 [[vk::binding(0, 0)]]
 RWByteAddressBuffer rw_buffers[];
 
@@ -45,36 +48,184 @@ public struct ReadWriteBuffer<T> {
   public inline void store(uint id, T new_value) {
     raw_buffer.Store<T>(id * sizeof(T), new_value);
   }
-}
 
-}
-
-// Sampled images
-namespace vulcany {
-[[vk::binding(1, 0)]]
-
-public enum ImageDim { Dim1D, Dim2D, Dim3D, CubeMap }
-
-Texture2D<float4> sampled_images_f4[];
-
-public struct SampledImage<T = float4, let dim : ImageDim = ImageDim::Dim2D> {
-  public void get_texture() {
-    switch (dim) {
-    case ImageDim::Dim1D:
-      break;
-    case ImageDim::Dim2D:
-      break;
-    case ImageDim::Dim3D:
-      break;
-    case ImageDim::CubeMap:
-      break;
-    }
+  public inline void atomic_add_f32(uint id, float val) {
+    raw_buffer.InterlockedAddF32(id * 4, val);
   }
 }
 
-// Storage Images
-[[vk::binding(2, 0)]]
-RWTexture2D<float4> storage_images_f4[];
+//----------------
+// SAMPLER
+// ---------------
+[[vk::binding(3, 0)]]
+SamplerState samplers[];
 
-public struct StorageImage<T = float4, let dim : ImageDim = ImageDim::Dim2D> {}
+public SamplerState get_sampler(uint index) { return nexion::samplers[index]; }
+
+#define DECLARE_SAMPLED_IMGS_1D(TYPE)                                          \
+  [[vk::binding(1, 0)]]                                                        \
+  Texture1D<TYPE> sampled_images_1d_##TYPE[];
+
+#define DECLARE_SAMPLED_IMGS_2D(TYPE)                                          \
+  [[vk::binding(1, 0)]]                                                        \
+  Texture2D<TYPE> sampled_images_2d_##TYPE[];
+
+#define DECLARE_SAMPLED_IMGS_3D(TYPE)                                          \
+  [[vk::binding(1, 0)]]                                                        \
+  Texture3D<TYPE> sampled_images_3d_##TYPE[];
+
+#define DECLARE_SAMPLED_IMGS_CUBE(TYPE)                                        \
+  [[vk::binding(1, 0)]]                                                        \
+  TextureCube<TYPE> sampled_images_cube_##TYPE[];
+
+#define DECLARE_RW_IMGS_1D(TYPE)                                               \
+  [[vk::binding(2, 0)]]                                                        \
+  RWTexture1D<TYPE> rw_images_1d_##TYPE[];
+
+#define DECLARE_RW_IMGS_2D(TYPE)                                               \
+  [[vk::binding(1, 0)]]                                                        \
+  RWTexture2D<TYPE> rw_images_2d_##TYPE[];
+
+#define DECLARE_RW_IMGS_3D(TYPE)                                               \
+  [[vk::binding(1, 0)]]                                                        \
+  RWTexture3D<TYPE> rw_images_3d_##TYPE[];
+
+#define GET_SAMPLED_IMG_1D(TYPE, index) nexion::sampled_images_1d_##TYPE[index]
+#define GET_SAMPLED_IMG_2D(TYPE, index) nexion::sampled_images_2d_##TYPE[index]
+#define GET_SAMPLED_IMG_3D(TYPE, index) nexion::sampled_images_3d_##TYPE[index]
+#define GET_SAMPLED_IMG_CUBE(TYPE, index)                                      \
+  nexion::sampled_images_cube_##TYPE[index]
+
+// -----------------------------------------
+// Sampled images
+// -----------------------------------------
+// 1D
+DECLARE_SAMPLED_IMGS_1D(float)
+DECLARE_SAMPLED_IMGS_1D(float2)
+DECLARE_SAMPLED_IMGS_1D(float3)
+DECLARE_SAMPLED_IMGS_1D(float4)
+DECLARE_SAMPLED_IMGS_1D(half)
+DECLARE_SAMPLED_IMGS_1D(half2)
+DECLARE_SAMPLED_IMGS_1D(half3)
+DECLARE_SAMPLED_IMGS_1D(half4)
+DECLARE_SAMPLED_IMGS_1D(uint)
+DECLARE_SAMPLED_IMGS_1D(uint2)
+DECLARE_SAMPLED_IMGS_1D(uint3)
+DECLARE_SAMPLED_IMGS_1D(uint4)
+DECLARE_SAMPLED_IMGS_1D(int)
+DECLARE_SAMPLED_IMGS_1D(int2)
+DECLARE_SAMPLED_IMGS_1D(int3)
+DECLARE_SAMPLED_IMGS_1D(int4)
+
+// 2D
+DECLARE_SAMPLED_IMGS_2D(float)
+DECLARE_SAMPLED_IMGS_2D(float2)
+DECLARE_SAMPLED_IMGS_2D(float3)
+DECLARE_SAMPLED_IMGS_2D(float4)
+DECLARE_SAMPLED_IMGS_2D(half)
+DECLARE_SAMPLED_IMGS_2D(half2)
+DECLARE_SAMPLED_IMGS_2D(half3)
+DECLARE_SAMPLED_IMGS_2D(half4)
+DECLARE_SAMPLED_IMGS_2D(uint)
+DECLARE_SAMPLED_IMGS_2D(uint2)
+DECLARE_SAMPLED_IMGS_2D(uint3)
+DECLARE_SAMPLED_IMGS_2D(uint4)
+DECLARE_SAMPLED_IMGS_2D(int)
+DECLARE_SAMPLED_IMGS_2D(int2)
+DECLARE_SAMPLED_IMGS_2D(int3)
+DECLARE_SAMPLED_IMGS_2D(int4)
+
+// 3D
+DECLARE_SAMPLED_IMGS_3D(float)
+DECLARE_SAMPLED_IMGS_3D(float2)
+DECLARE_SAMPLED_IMGS_3D(float3)
+DECLARE_SAMPLED_IMGS_3D(float4)
+DECLARE_SAMPLED_IMGS_3D(half)
+DECLARE_SAMPLED_IMGS_3D(half2)
+DECLARE_SAMPLED_IMGS_3D(half3)
+DECLARE_SAMPLED_IMGS_3D(half4)
+DECLARE_SAMPLED_IMGS_3D(uint)
+DECLARE_SAMPLED_IMGS_3D(uint2)
+DECLARE_SAMPLED_IMGS_3D(uint3)
+DECLARE_SAMPLED_IMGS_3D(uint4)
+DECLARE_SAMPLED_IMGS_3D(int)
+DECLARE_SAMPLED_IMGS_3D(int2)
+DECLARE_SAMPLED_IMGS_3D(int3)
+DECLARE_SAMPLED_IMGS_3D(int4)
+
+// Cube
+DECLARE_SAMPLED_IMGS_CUBE(float)
+DECLARE_SAMPLED_IMGS_CUBE(float2)
+DECLARE_SAMPLED_IMGS_CUBE(float3)
+DECLARE_SAMPLED_IMGS_CUBE(float4)
+DECLARE_SAMPLED_IMGS_CUBE(half)
+DECLARE_SAMPLED_IMGS_CUBE(half2)
+DECLARE_SAMPLED_IMGS_CUBE(half3)
+DECLARE_SAMPLED_IMGS_CUBE(half4)
+DECLARE_SAMPLED_IMGS_CUBE(uint)
+DECLARE_SAMPLED_IMGS_CUBE(uint2)
+DECLARE_SAMPLED_IMGS_CUBE(uint3)
+DECLARE_SAMPLED_IMGS_CUBE(uint4)
+DECLARE_SAMPLED_IMGS_CUBE(int)
+DECLARE_SAMPLED_IMGS_CUBE(int2)
+DECLARE_SAMPLED_IMGS_CUBE(int3)
+DECLARE_SAMPLED_IMGS_CUBE(int4)
+
+// -----------------------------------------
+// Storage images
+// -----------------------------------------
+// 1D
+DECLARE_RW_IMGS_1D(float)
+DECLARE_RW_IMGS_1D(float2)
+DECLARE_RW_IMGS_1D(float3)
+DECLARE_RW_IMGS_1D(float4)
+DECLARE_RW_IMGS_1D(half)
+DECLARE_RW_IMGS_1D(half2)
+DECLARE_RW_IMGS_1D(half3)
+DECLARE_RW_IMGS_1D(half4)
+DECLARE_RW_IMGS_1D(uint)
+DECLARE_RW_IMGS_1D(uint2)
+DECLARE_RW_IMGS_1D(uint3)
+DECLARE_RW_IMGS_1D(uint4)
+DECLARE_RW_IMGS_1D(int)
+DECLARE_RW_IMGS_1D(int2)
+DECLARE_RW_IMGS_1D(int3)
+DECLARE_RW_IMGS_1D(int4)
+
+// 2D
+DECLARE_RW_IMGS_2D(float)
+DECLARE_RW_IMGS_2D(float2)
+DECLARE_RW_IMGS_2D(float3)
+DECLARE_RW_IMGS_2D(float4)
+DECLARE_RW_IMGS_2D(half)
+DECLARE_RW_IMGS_2D(half2)
+DECLARE_RW_IMGS_2D(half3)
+DECLARE_RW_IMGS_2D(half4)
+DECLARE_RW_IMGS_2D(uint)
+DECLARE_RW_IMGS_2D(uint2)
+DECLARE_RW_IMGS_2D(uint3)
+DECLARE_RW_IMGS_2D(uint4)
+DECLARE_RW_IMGS_2D(int)
+DECLARE_RW_IMGS_2D(int2)
+DECLARE_RW_IMGS_2D(int3)
+DECLARE_RW_IMGS_2D(int4)
+
+// 3D
+DECLARE_RW_IMGS_3D(float)
+DECLARE_RW_IMGS_3D(float2)
+DECLARE_RW_IMGS_3D(float3)
+DECLARE_RW_IMGS_3D(float4)
+DECLARE_RW_IMGS_3D(half)
+DECLARE_RW_IMGS_3D(half2)
+DECLARE_RW_IMGS_3D(half3)
+DECLARE_RW_IMGS_3D(half4)
+DECLARE_RW_IMGS_3D(uint)
+DECLARE_RW_IMGS_3D(uint2)
+DECLARE_RW_IMGS_3D(uint3)
+DECLARE_RW_IMGS_3D(uint4)
+DECLARE_RW_IMGS_3D(int)
+DECLARE_RW_IMGS_3D(int2)
+DECLARE_RW_IMGS_3D(int3)
+DECLARE_RW_IMGS_3D(int4)
+
 }

@@ -1,20 +1,31 @@
 use crate::{
-    BufferDescription, BufferID, BufferWriteInfo, Fence, ImageDescription, ImageDescriptorType, ImageID, ImageViewDescription, ImageViewID, ImageWriteInfo, QueueSubmitInfo, QueueType,
-    SamplerDescription, SamplerID, SamplerWriteInfo, Semaphore, SwapchainDescription,
-    backend::{
-        gpu_resources::{BufferSlot, GpuBindlessDescriptorPool, GpuResourcePool, ImageSlot, ImageViewSlot, SamplerSlot},
-        instance::InnerInstance,
-    },
+    backend::{gpu_resources::*, instance::InnerInstance},
+    *,
 };
 
-use super::instance::PhysicalDevice;
-use ash::vk::{self};
-use std::{
-    ptr::null_mut,
-    sync::{Arc, RwLock},
-    u64,
-};
+use ash::vk;
+use std::sync::{Arc, RwLock};
 use vk_mem::*;
+
+pub(crate) struct QueueFamilyIndices {
+    pub graphics_family: Option<u32>,
+    pub transfer_family: Option<u32>,
+    pub compute_family: Option<u32>,
+}
+
+impl QueueFamilyIndices {
+    fn is_complete(&self) -> bool {
+        return self.graphics_family.is_some() && self.compute_family.is_some() && self.transfer_family.is_some();
+    }
+}
+
+pub(crate) struct PhysicalDevice {
+    pub handle: vk::PhysicalDevice,
+    pub queue_families: QueueFamilyIndices,
+    pub properties: vk::PhysicalDeviceProperties2<'static>,
+}
+
+// TODO: Should i use an unsafe cell instead of RwLock?
 
 pub(crate) struct InnerDevice {
     pub(crate) allocator: Allocator,
@@ -33,108 +44,242 @@ pub(crate) struct InnerDevice {
     pub(crate) graphics_queue: vk::Queue,
     pub(crate) transfer_queue: vk::Queue,
     pub(crate) compute_queue: vk::Queue,
-
-    // Extensions
-    pub(crate) rt: Option<ash::khr::ray_tracing_pipeline::Device>,
 }
 
-// Swapchain Creation //
 impl InnerDevice {
-    fn choose_surface_format(available_formats: &[vk::SurfaceFormatKHR]) -> vk::SurfaceFormatKHR {
-        available_formats
-            .iter()
-            .cloned()
-            .find(|f| f.format == vk::Format::R16G16B16A16_SFLOAT && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR)
-            .unwrap_or_else(|| available_formats[0])
-    }
+    pub(crate) fn new(device_desc: &DeviceDescription, instance: Arc<InnerInstance>) -> InnerDevice {
+        // Required device extensions (swapchain needed for presentation)
+        let mut device_extensions = vec![ash::khr::swapchain::NAME.as_ptr(), ash::khr::synchronization2::NAME.as_ptr()];
 
-    fn choose_present_mode(available_modes: &[vk::PresentModeKHR]) -> vk::PresentModeKHR {
-        if available_modes.contains(&vk::PresentModeKHR::MAILBOX) {
-            vk::PresentModeKHR::MAILBOX
-        } else {
-            vk::PresentModeKHR::FIFO
-        }
-    }
-
-    fn choose_extent(capabilities: &vk::SurfaceCapabilitiesKHR, width: u32, height: u32) -> vk::Extent2D {
-        if capabilities.current_extent.width != u32::MAX {
-            capabilities.current_extent
-        } else {
-            vk::Extent2D {
-                width: width.clamp(capabilities.min_image_extent.width, capabilities.max_image_extent.width),
-                height: height.clamp(capabilities.min_image_extent.height, capabilities.max_image_extent.height),
+        let physical_device = {
+            let dev = Self::select_physical_device(&instance, &device_extensions);
+            if dev.is_none() {
+                panic!("Failed to find vulkan compatible device")
             }
-        }
-    }
 
-    pub(crate) fn create_swapchain_data(
-        &self,
-        swapchain_description: &SwapchainDescription,
-        old_swapchain: vk::SwapchainKHR,
-    ) -> (ash::khr::swapchain::Device, vk::SwapchainKHR, Vec<ImageID>, Vec<ImageViewID>) {
-        let swapchain_loader = ash::khr::swapchain::Device::new(&self.instance.handle, &self.handle);
+            dev.unwrap()
+        };
 
-        let support = &self.physical_device.swapchain_support;
+        let unique_families: Vec<u32> = {
+            let mut v = vec![
+                physical_device.queue_families.graphics_family.unwrap(),
+                physical_device.queue_families.transfer_family.unwrap(),
+                physical_device.queue_families.compute_family.unwrap(),
+            ];
+            v.sort();
+            v.dedup();
+            v
+        };
 
-        let extent = InnerDevice::choose_extent(&support.capabilities, swapchain_description.width, swapchain_description.height);
-        let present_mode = InnerDevice::choose_present_mode(&support.present_modes);
-        let surface_format = InnerDevice::choose_surface_format(&support.formats);
-
-        let graphics_family = self.physical_device.queue_families.graphics_family.expect("This shouldnt be possible lol");
-        let present_family = self.physical_device.queue_families.presetation_family.expect("This shouldnt be possible lol");
-
-        let mut create_info = vk::SwapchainCreateInfoKHR::default()
-            .surface(self.instance.surface.handle)
-            .min_image_count(swapchain_description.image_count)
-            .image_format(surface_format.format)
-            .image_color_space(surface_format.color_space)
-            .image_extent(extent)
-            .image_array_layers(1)
-            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT);
-
-        let queue_family_indices = [graphics_family, present_family];
-
-        if graphics_family != present_family {
-            create_info = create_info.image_sharing_mode(vk::SharingMode::CONCURRENT).queue_family_indices(&queue_family_indices);
-        } else {
-            create_info = create_info.image_sharing_mode(vk::SharingMode::EXCLUSIVE);
-        }
-
-        create_info = create_info
-            .pre_transform(support.capabilities.current_transform)
-            .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
-            .present_mode(present_mode)
-            .clipped(true)
-            .old_swapchain(old_swapchain);
-
-        let swapchain = unsafe { swapchain_loader.create_swapchain(&create_info, None).expect("Failed to create swapchain") };
-
-        let images = unsafe { swapchain_loader.get_swapchain_images(swapchain).expect("Failed to get swapchain images") };
-
-        let image_ids: Vec<ImageID> = images
+        // Queue priorities (all same)
+        let priorities = [1.0_f32];
+        let queue_infos: Vec<_> = unique_families
             .iter()
-            .map(|&image| {
-                let id = self.image_pool.write().unwrap().add(ImageSlot {
-                    handle: image,
-                    allocation: vk_mem::Allocation(std::ptr::null_mut()),
-                    alloc_info: vk_mem::AllocationInfo {
-                        memory_type: 0,
-                        device_memory: vk::DeviceMemory::null(),
-                        user_data: 0,
-                        mapped_data: null_mut(),
-                        offset: 0,
-                        size: 0,
-                    },
-                    format: surface_format.format,
-                });
-
-                ImageID { id: id }
-            })
+            .map(|&family| vk::DeviceQueueCreateInfo::default().queue_family_index(family).queue_priorities(&priorities))
             .collect();
 
-        let image_views: Vec<ImageViewID> = image_ids.iter().map(|&image_id| self.create_image_view(image_id, &ImageViewDescription::default())).collect();
+        // Existing common features
+        let features = vk::PhysicalDeviceFeatures::default().shader_int64(true).multi_draw_indirect(true).sampler_anisotropy(true);
+        let mut float_atomic_features = vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT::default().shader_buffer_float32_atomic_add(true);
 
-        return (swapchain_loader, swapchain, image_ids, image_views);
+        let mut dynamic_rendering_features = vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
+
+        let mut indexing_features = vk::PhysicalDeviceDescriptorIndexingFeatures::default()
+            .shader_sampled_image_array_non_uniform_indexing(true)
+            .descriptor_binding_partially_bound(true)
+            .runtime_descriptor_array(true)
+            .descriptor_binding_variable_descriptor_count(true)
+            .descriptor_binding_sampled_image_update_after_bind(true)
+            .descriptor_binding_storage_buffer_update_after_bind(true)
+            .descriptor_binding_storage_image_update_after_bind(true)
+            .descriptor_binding_storage_texel_buffer_update_after_bind(true)
+            .descriptor_binding_uniform_buffer_update_after_bind(true)
+            .descriptor_binding_uniform_texel_buffer_update_after_bind(true);
+
+        let mut sync2 = vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true);
+        let mut timeline_sem = vk::PhysicalDeviceTimelineSemaphoreFeatures::default().timeline_semaphore(true);
+        let mut buffer_device_address = vk::PhysicalDeviceBufferDeviceAddressFeatures::default().buffer_device_address(true);
+        let mut vk_features_11 = vk::PhysicalDeviceVulkan11Features::default().shader_draw_parameters(true);
+
+        // ----> CONDITIONAL RAY TRACING ADDITIONS <----
+        let mut accel_struct_features = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default();
+        let mut rt_pipeline_features = vk::PhysicalDeviceRayTracingPipelineFeaturesKHR::default();
+        let mut ray_query_features = vk::PhysicalDeviceRayQueryFeaturesKHR::default();
+
+        if device_desc.ray_tracing {
+            // Add RT extensions
+            device_extensions.push(ash::khr::acceleration_structure::NAME.as_ptr());
+            device_extensions.push(ash::khr::ray_tracing_pipeline::NAME.as_ptr());
+            device_extensions.push(ash::khr::deferred_host_operations::NAME.as_ptr());
+
+            // Enable the Vulkan features
+            accel_struct_features = accel_struct_features.acceleration_structure(true);
+            rt_pipeline_features = rt_pipeline_features.ray_tracing_pipeline(true);
+
+            // Optional: RT queries inside shaders
+            ray_query_features = ray_query_features.ray_query(true);
+        }
+
+        if device_desc.atomic_float_operations {
+            device_extensions.push(ash::ext::shader_atomic_float::NAME.as_ptr());
+        }
+
+        // ----> Build final feature2 chain <----
+        let mut features2 = vk::PhysicalDeviceFeatures2::default()
+            .push_next(&mut indexing_features)
+            .push_next(&mut dynamic_rendering_features)
+            .push_next(&mut sync2)
+            .push_next(&mut timeline_sem)
+            .push_next(&mut buffer_device_address)
+            .push_next(&mut vk_features_11)
+            .features(features);
+
+        // Add ray tracing feature structs *only if* enabled
+        if device_desc.ray_tracing {
+            features2 = features2.push_next(&mut accel_struct_features).push_next(&mut rt_pipeline_features).push_next(&mut ray_query_features);
+        }
+
+        if device_desc.atomic_float_operations {
+            features2 = features2.push_next(&mut float_atomic_features);
+        }
+
+        let create_info = vk::DeviceCreateInfo::default()
+            .queue_create_infos(&queue_infos)
+            .enabled_extension_names(&device_extensions)
+            .push_next(&mut features2);
+
+        let dev = unsafe { instance.handle.create_device(physical_device.handle, &create_info, None).expect("Failed to create logical device") };
+
+        let mut allocator_create_info = vk_mem::AllocatorCreateInfo::new(&instance.handle, &dev, physical_device.handle);
+        allocator_create_info.vulkan_api_version = instance.api_version.clone() as u32;
+        allocator_create_info.flags = vk_mem::AllocatorCreateFlags::EXTERNALLY_SYNCHRONIZED | vk_mem::AllocatorCreateFlags::BUFFER_DEVICE_ADDRESS;
+
+        let allocator = unsafe { vk_mem::Allocator::new(allocator_create_info).expect("Failed to create vma allocator") };
+
+        let bindless_desc = GpuBindlessDescriptorPool::new(&dev, 100, 100, 100, 100);
+
+        let graphics_queue = unsafe { dev.get_device_queue(physical_device.queue_families.graphics_family.unwrap(), 0) };
+        let compute_queue = unsafe { dev.get_device_queue(physical_device.queue_families.compute_family.unwrap(), 0) };
+        let transfer_queue = unsafe { dev.get_device_queue(physical_device.queue_families.transfer_family.unwrap(), 0) };
+
+        return InnerDevice {
+            handle: dev,
+            physical_device: physical_device,
+            allocator: allocator,
+            instance: instance,
+
+            //Resource Pools
+            bindless_descriptors: bindless_desc,
+            buffer_pool: RwLock::new(GpuResourcePool::new()),
+            image_pool: RwLock::new(GpuResourcePool::new()),
+            image_view_pool: RwLock::new(GpuResourcePool::new()),
+            sampler_pool: RwLock::new(GpuResourcePool::new()),
+
+            //Queues
+            graphics_queue: graphics_queue,
+            transfer_queue: transfer_queue,
+            compute_queue: compute_queue,
+        };
+    }
+
+    fn get_queue_families(instance: &Arc<InnerInstance>, physical_device: ash::vk::PhysicalDevice) -> Option<QueueFamilyIndices> {
+        let queue_families = unsafe { instance.handle.get_physical_device_queue_family_properties(physical_device) };
+
+        let mut indices = QueueFamilyIndices {
+            graphics_family: None,
+            transfer_family: None,
+            compute_family: None,
+        };
+
+        for (i, family) in queue_families.iter().enumerate() {
+            // Graphics
+            if family.queue_flags.contains(ash::vk::QueueFlags::GRAPHICS) && indices.graphics_family.is_none() {
+                indices.graphics_family = Some(i as u32);
+            }
+
+            // Compute (dedicated if possible)
+            if family.queue_flags.contains(ash::vk::QueueFlags::COMPUTE) && !family.queue_flags.contains(ash::vk::QueueFlags::GRAPHICS) && indices.compute_family.is_none() {
+                indices.compute_family = Some(i as u32);
+            }
+
+            // Transfer (dedicated if possible)
+            if family.queue_flags.contains(ash::vk::QueueFlags::TRANSFER)
+                && !family.queue_flags.contains(ash::vk::QueueFlags::GRAPHICS)
+                && !family.queue_flags.contains(ash::vk::QueueFlags::COMPUTE)
+                && indices.transfer_family.is_none()
+            {
+                indices.transfer_family = Some(i as u32);
+            }
+
+            if indices.is_complete() {
+                break;
+            }
+        }
+
+        if indices.is_complete() {
+            return Some(indices);
+        } else {
+            return None;
+        }
+    }
+
+    fn check_device_extension_support(instance: &Arc<InnerInstance>, device: ash::vk::PhysicalDevice, required_extensions: &Vec<*const i8>) -> bool {
+        let available_extensions = unsafe { instance.handle.enumerate_device_extension_properties(device).expect("Failed to enumerate device extensions") };
+
+        return required_extensions.iter().all(|&required_ptr| {
+            let required_str = unsafe { std::ffi::CStr::from_ptr(required_ptr) };
+
+            available_extensions.iter().any(|avail| {
+                let avail_str = unsafe { std::ffi::CStr::from_ptr(avail.extension_name.as_ptr()) };
+
+                avail_str == required_str
+            })
+        });
+    }
+
+    fn select_physical_device(instance: &Arc<InnerInstance>, required_extensions: &Vec<*const i8>) -> Option<PhysicalDevice> {
+        let devices = unsafe { instance.handle.enumerate_physical_devices().expect("Failed to enumerate physical devices") };
+
+        let mut best_device: Option<(i32, PhysicalDevice)> = None;
+
+        for device in devices {
+            let mut props: vk::PhysicalDeviceProperties2 = vk::PhysicalDeviceProperties2::default();
+            unsafe {
+                instance.handle.get_physical_device_properties2(device, &mut props);
+            };
+
+            if let Some(qf) = Self::get_queue_families(instance, device) {
+                if !Self::check_device_extension_support(instance, device, required_extensions) {
+                    continue;
+                }
+
+                // Score device: discrete = 1000, integrated = 100, others = 10
+                let score = match props.properties.device_type {
+                    ash::vk::PhysicalDeviceType::DISCRETE_GPU => 1000,
+                    ash::vk::PhysicalDeviceType::INTEGRATED_GPU => 100,
+                    _ => 10,
+                };
+
+                // Prefer larger max image dimension as tiebreaker
+                let score = score + props.properties.limits.max_image_dimension2_d as i32;
+
+                let candidate = PhysicalDevice {
+                    handle: device,
+                    queue_families: qf,
+                    properties: props,
+                };
+
+                if let Some((best_score, _)) = &best_device {
+                    if score > *best_score {
+                        best_device = Some((score, candidate));
+                    }
+                } else {
+                    best_device = Some((score, candidate));
+                }
+            }
+        }
+
+        return best_device.map(|(_, dev)| dev);
     }
 }
 
@@ -195,6 +340,13 @@ impl InnerDevice {
             std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
         }
     }
+
+    pub(crate) fn get_raw_ptr(&self, buffer_id: BufferID) -> *mut u8 {
+        let buffer_pool = self.buffer_pool.read().unwrap();
+        let buffer = buffer_pool.get_ref(buffer_id.id);
+
+        return buffer.alloc_info.mapped_data as *mut u8;
+    }
 }
 
 // Image //
@@ -202,11 +354,7 @@ impl InnerDevice {
     pub(crate) fn create_image(&self, image_desc: &ImageDescription) -> ImageID {
         let image_create_info = vk::ImageCreateInfo::default()
             .usage(image_desc.usage.to_vk_flag())
-            .extent(vk::Extent3D {
-                height: image_desc.height,
-                width: image_desc.width,
-                depth: image_desc.depth,
-            })
+            .extent(image_desc.extent.to_vk())
             .format(image_desc.format.to_vk_format())
             .array_layers(image_desc.array_layers)
             .mip_levels(image_desc.mip_levels)

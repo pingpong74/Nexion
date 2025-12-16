@@ -1,6 +1,8 @@
 use ash::vk;
 use std::ops::BitOr;
 
+use crate::Extent3D;
+
 /// Specifies the desired properties for a memory allocation.
 ///
 /// These variants typically correspond to strategies for choosing
@@ -144,28 +146,65 @@ impl ImageType {
     }
 }
 
-#[derive(Clone)]
-pub enum ImageUsage {
-    TransferSrc,
-    TransferDst,
-    Sampled,
-    Storage,
-    ColorAttachment,
-    DepthStencilAttachment,
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
+pub struct ImageUsage {
+    pub(crate) flags: vk::ImageUsageFlags,
 }
 
 impl ImageUsage {
-    pub(crate) const fn to_vk_flag(&self) -> vk::ImageUsageFlags {
-        return match self {
-            Self::TransferSrc => vk::ImageUsageFlags::TRANSFER_SRC,
-            Self::TransferDst => vk::ImageUsageFlags::TRANSFER_DST,
-            Self::Sampled => vk::ImageUsageFlags::SAMPLED,
-            Self::Storage => vk::ImageUsageFlags::STORAGE,
-            Self::ColorAttachment => vk::ImageUsageFlags::COLOR_ATTACHMENT,
-            Self::DepthStencilAttachment => vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-        };
+    pub const TRANSFER_SRC: Self = Self {
+        flags: vk::ImageUsageFlags::TRANSFER_SRC,
+    };
+    pub const TRANSFER_DST: Self = Self {
+        flags: vk::ImageUsageFlags::TRANSFER_DST,
+    };
+    pub const SAMPLED: Self = Self { flags: vk::ImageUsageFlags::SAMPLED };
+    pub const STORAGE: Self = Self { flags: vk::ImageUsageFlags::STORAGE };
+    pub const COLOR_ATTACHMENT: Self = Self {
+        flags: vk::ImageUsageFlags::COLOR_ATTACHMENT,
+    };
+    pub const DEPTH_STENCIL_ATTACHMENT: Self = Self {
+        flags: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+    };
+
+    /// Converts to raw Vulkan flags
+    pub(crate) fn to_vk_flag(&self) -> vk::ImageUsageFlags {
+        self.flags
     }
 }
+
+impl BitOr for ImageUsage {
+    type Output = Self;
+
+    fn bitor(self, other: Self) -> Self::Output {
+        Self { flags: self.flags | other.flags }
+    }
+}
+
+impl BitOr<&ImageUsage> for ImageUsage {
+    type Output = Self;
+
+    fn bitor(self, other: &ImageUsage) -> Self::Output {
+        Self { flags: self.flags | other.flags }
+    }
+}
+
+impl BitOr<ImageUsage> for &ImageUsage {
+    type Output = ImageUsage;
+
+    fn bitor(self, other: ImageUsage) -> Self::Output {
+        ImageUsage { flags: self.flags | other.flags }
+    }
+}
+
+impl BitOr<&ImageUsage> for &ImageUsage {
+    type Output = ImageUsage;
+
+    fn bitor(self, other: &ImageUsage) -> Self::Output {
+        ImageUsage { flags: self.flags | other.flags }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum Format {
     // --- Unsigned Normalized (UNORM) Formats - Standard Color & Textures ---
@@ -174,6 +213,7 @@ pub enum Format {
     Rgb565Unorm,
 
     // --- Signed/Unsigned Integers (SINT/UINT) ---
+    R32Uint,
     Rgba8Uint,
     Rgba32Sint,
 
@@ -203,6 +243,7 @@ impl Format {
             Self::Rgb565Unorm => vk::Format::R5G6B5_UNORM_PACK16,
 
             // Signed/Unsigned Integers (SINT/UINT)
+            Self::R32Uint => vk::Format::R32_UINT,
             Self::Rgba8Uint => vk::Format::R8G8B8A8_UINT,
             Self::Rgba32Sint => vk::Format::R32G32B32A32_SINT,
 
@@ -283,9 +324,7 @@ pub struct ImageDescription {
     pub usage: ImageUsage,
     pub format: Format,
     pub image_type: ImageType,
-    pub height: u32,
-    pub width: u32,
-    pub depth: u32,
+    pub extent: Extent3D,
     pub memory_type: MemoryType,
     pub mip_levels: u32,
     pub array_layers: u32,
@@ -295,12 +334,10 @@ pub struct ImageDescription {
 impl Default for ImageDescription {
     fn default() -> Self {
         return Self {
-            usage: ImageUsage::Sampled,
+            usage: ImageUsage::SAMPLED,
             format: Format::Rgba16Float,
             image_type: ImageType::Type2D,
-            height: 1,
-            width: 1,
-            depth: 1,
+            extent: Extent3D { width: 1, height: 1, depth: 1 },
             memory_type: MemoryType::Auto,
             mip_levels: 1,
             array_layers: 1,
@@ -515,7 +552,7 @@ impl Default for SamplerDescription {
             max_anisotropy: None,
             compare_op: None,
             min_lod: 0.0,
-            max_lod: 1000.0,
+            max_lod: 0.0,
             border_color: BorderColor::IntOpaqueBlack,
             unnormalized_coordinates: false,
         }
