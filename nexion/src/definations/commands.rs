@@ -196,19 +196,19 @@ impl RenderingFlags {
     }
 }
 
-pub struct RenderingBeginInfo {
+pub struct RenderingBeginInfo<'a> {
     pub render_area: RenderArea,
     pub rendering_flags: RenderingFlags,
     pub view_mask: u32,
     pub layer_count: u32,
-    pub color_attachments: Vec<RenderingAttachment>,
+    pub color_attachments: &'a [RenderingAttachment],
     pub depth_attachment: Option<RenderingAttachment>,
     pub stencil_attachment: Option<RenderingAttachment>,
 }
 
-impl Default for RenderingBeginInfo {
+impl<'a> Default for RenderingBeginInfo<'a> {
     fn default() -> Self {
-        return Self {
+        Self {
             render_area: RenderArea {
                 offset: Offset2D { x: 0, y: 0 },
                 extent: Extent2D { width: 0, height: 0 },
@@ -216,10 +216,10 @@ impl Default for RenderingBeginInfo {
             rendering_flags: RenderingFlags::None,
             view_mask: 0,
             layer_count: 0,
-            color_attachments: Vec::new(),
+            color_attachments: &[],
             depth_attachment: None,
             stencil_attachment: None,
-        };
+        }
     }
 }
 
@@ -284,6 +284,12 @@ pub struct DispatchIndirectInfo {
     pub offset: u64,
 }
 
+pub struct CopyRegions {
+    pub src_offset: u64,
+    pub dst_offset: u64,
+    pub size: u64,
+}
+
 // Copy commands
 pub struct BufferCopyInfo {
     pub src_buffer: BufferID,
@@ -302,8 +308,8 @@ pub struct BufferFillInfo {
 
 #[derive(Clone, Copy)]
 pub struct BufferImageCopyInfo {
-    pub src_buffer: BufferID,
-    pub dst_image: ImageID,
+    pub buffer: BufferID,
+    pub image: ImageID,
     pub dst_image_layout: ImageLayout,
     pub region: BufferImageCopyRegion,
 }
@@ -337,12 +343,12 @@ pub struct ImageCopyRegion {
 }
 
 #[derive(Clone)]
-pub struct BlitInfo {
+pub struct BlitInfo<'a> {
     pub src_image: ImageID,
     pub src_layout: ImageLayout,
     pub dst_image: ImageID,
     pub dst_layout: ImageLayout,
-    pub regions: Vec<BlitRegion>,
+    pub regions: &'a [BlitRegion],
     pub filter: Filter,
 }
 
@@ -357,7 +363,6 @@ pub struct BlitRegion {
 // Memory barriers
 #[derive(Clone, Copy, Debug)]
 pub enum PipelineStage {
-    // Sync2 "common" stages
     None,
     TopOfPipe,
     BottomOfPipe,
@@ -373,18 +378,14 @@ pub enum PipelineStage {
     ColorAttachmentOutput,
     ComputeShader,
     AllTransfer,
-    Transfer, // alias of Copy+Resolve+Blit+Clear (Vulkan defines a combined bit)
+    Transfer,
     Copy,
     Resolve,
     Blit,
     Clear,
-
-    // Acceleration structure + ray tracing stages
     RayTracingShader,
     AccelerationStructureBuild,
     AccelerationStructureCopy,
-
-    // Host and general
     Host,
     AllGraphics,
     AllCommands,
@@ -564,9 +565,9 @@ pub struct SemaphoreInfo {
     pub value: Option<u64>,
 }
 
-pub struct QueueSubmitInfo {
+pub struct QueueSubmitInfo<'a> {
     pub fence: Option<Fence>,
-    pub command_buffers: Vec<ExecutableCommandBuffer>,
-    pub wait_semaphores: Vec<SemaphoreInfo>,
-    pub signal_semaphores: Vec<SemaphoreInfo>,
+    pub command_buffers: &'a [ExecutableCommandBuffer],
+    pub wait_semaphores: &'a [SemaphoreInfo],
+    pub signal_semaphores: &'a [SemaphoreInfo],
 }

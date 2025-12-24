@@ -9,7 +9,7 @@ struct VertexOutput {
 
 [shader("fragment")]
 float4 main(VertexOutput input) {
-  let img = GET_SAMPLED_IMG_2D(float4, 0);
+  let img = GET_SAMPLED_IMG_2D(float4, 3);
   let sampler = nexion::get_sampler(0);
   let c = img.Sample(sampler, input.uv);
   return c;

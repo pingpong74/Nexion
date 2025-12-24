@@ -65,7 +65,7 @@ impl CommandRecorder {
     pub fn begin_rendering(&mut self, rendering_begin_info: &RenderingBeginInfo) {
         let mut color_attachment_info = SmallVec::<[vk::RenderingAttachmentInfo; 4]>::new();
 
-        for color_attachement in &rendering_begin_info.color_attachments {
+        for color_attachement in rendering_begin_info.color_attachments {
             let image_view = self.check_and_remeber_image_view_id(color_attachement.image_view);
             let resolve_image_view = if color_attachement.resolve_image_view.is_some() {
                 self.check_and_remeber_image_view_id(color_attachement.resolve_image_view.unwrap())
@@ -246,9 +246,6 @@ impl CommandRecorder {
         }
     }
 
-    //// ------------------------------------------------
-    //// 2. vkCmdDrawIndexedIndirect
-    //// ------------------------------------------------
     pub fn draw_indexed_indirect(&mut self, info: &DrawIndexedIndirectInfo) {
         let buf = self.check_and_remeber_buffer_id(info.buffer);
         unsafe {
@@ -256,9 +253,6 @@ impl CommandRecorder {
         }
     }
 
-    //// ------------------------------------------------
-    //// 3. vkCmdDrawIndirectCount
-    //// ------------------------------------------------
     pub fn draw_indirect_count(&mut self, info: &DrawIndirectCountInfo) {
         let buf = self.check_and_remeber_buffer_id(info.buffer);
         let count_buf = self.check_and_remeber_buffer_id(info.count_buffer);
@@ -269,9 +263,6 @@ impl CommandRecorder {
         }
     }
 
-    //// ------------------------------------------------
-    //// 4. vkCmdDrawIndexedIndirectCount
-    //// ------------------------------------------------
     pub fn draw_indexed_indirect_count(&mut self, info: &DrawIndexedIndirectCountInfo) {
         let buf = self.check_and_remeber_buffer_id(info.buffer);
         let count_buf = self.check_and_remeber_buffer_id(info.count_buffer);
@@ -367,7 +358,10 @@ impl CommandRecorder {
         let src_buffer = self.check_and_remeber_buffer_id(buffer_copy_info.src_buffer);
         let dst_buffer = self.check_and_remeber_buffer_id(buffer_copy_info.dst_buffer);
 
-        let copy_region = vk::BufferCopy2::default().src_offset(0).dst_offset(0).size(buffer_copy_info.size);
+        let copy_region = vk::BufferCopy2::default()
+            .src_offset(buffer_copy_info.src_offset)
+            .dst_offset(buffer_copy_info.dst_offset)
+            .size(buffer_copy_info.size);
 
         let copy_info = vk::CopyBufferInfo2::default().src_buffer(src_buffer).dst_buffer(dst_buffer).regions(std::slice::from_ref(&copy_region));
 
@@ -385,8 +379,8 @@ impl CommandRecorder {
     }
 
     pub fn copy_buffer_to_image(&mut self, info: &BufferImageCopyInfo) {
-        let src = self.check_and_remeber_buffer_id(info.src_buffer);
-        let dst = self.check_and_remeber_image_id(info.dst_image);
+        let src = self.check_and_remeber_buffer_id(info.buffer);
+        let dst = self.check_and_remeber_image_id(info.image);
 
         let subresource = vk::ImageSubresourceLayers {
             aspect_mask: info.region.image_subresource.aspect.to_vk_aspect(),
@@ -416,8 +410,8 @@ impl CommandRecorder {
 
     pub fn copy_image_to_buffer(&mut self, info: &BufferImageCopyInfo) {
         // same struct is symmetric
-        let src = self.check_and_remeber_image_id(info.dst_image); // swap
-        let dst = self.check_and_remeber_buffer_id(info.src_buffer);
+        let src = self.check_and_remeber_image_id(info.image);
+        let dst = self.check_and_remeber_buffer_id(info.buffer);
 
         let subresource = vk::ImageSubresourceLayers {
             aspect_mask: info.region.image_subresource.aspect.to_vk_aspect(),

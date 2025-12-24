@@ -191,6 +191,13 @@ impl InnerSwapchain {
                 unsafe { loader.create_xcb_surface(&info, None).expect("Failed to create surface") }
             }
 
+            // -------------- Xlib ----------------
+            (RawWindowHandle::Xlib(w), RawDisplayHandle::Xlib(d)) => {
+                let info = ash::vk::XlibSurfaceCreateInfoKHR::default().dpy(d.display.unwrap().as_ptr() as *mut _).window(w.window);
+                let loader = ash::khr::xlib_surface::Instance::new(&device.instance.entry, &device.instance.handle);
+                unsafe { loader.create_xlib_surface(&info, None).expect("Failed to create surface") }
+            }
+
             // ---------------- Wayland ----------------
             (RawWindowHandle::Wayland(w), RawDisplayHandle::Wayland(d)) => {
                 let info = ash::vk::WaylandSurfaceCreateInfoKHR::default().display(d.display.as_ptr()).surface(w.surface.as_ptr());
@@ -228,7 +235,7 @@ impl InnerSwapchain {
 
         let (index, _) = unsafe { self.swapchain_loader.acquire_next_image2(&acquire_info).expect("Failed to acquire next image") };
 
-        self.curr_img_indeices.push(index);
+        self.curr_img_indeices.push(index).unwrap();
 
         //println!("{} {}", timeline_index, index);
 

@@ -19,7 +19,7 @@ impl PipelineManager {
             inner: Arc::new(InnerRasterizationPipeline {
                 handle: pipeline,
                 layout: layout,
-                desc: raster_pipeline_desc.clone(),
+                pc_info: raster_pipeline_desc.push_constants.clone(),
                 manager: self.inner.clone(),
             }),
         };
@@ -55,7 +55,7 @@ pub trait Pipeline {
 
 impl Pipeline for RasterizationPipeline {
     fn get_push_const_shader_stage(&self) -> ShaderStages {
-        return self.inner.desc.push_constants.stage_flags;
+        return self.inner.pc_info.stage_flags;
     }
     fn get_handle(&self) -> vk::Pipeline {
         return self.inner.handle;

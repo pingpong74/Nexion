@@ -7,6 +7,7 @@ use crate::{
     BinarySemaphore, BufferDescription, BufferID, BufferWriteInfo, CommandRecorder, Fence, ImageDescription, ImageID, ImageViewDescription, ImageViewID, ImageWriteInfo, PipelineManager,
     QueueSubmitInfo, QueueType, SamplerDescription, SamplerID, SamplerWriteInfo, Semaphore, Swapchain, SwapchainDescription, TimelineSemaphore,
     backend::{device::InnerDevice, pipelines::InnerPipelineManager, swapchain::InnerSwapchain},
+    utils::texture::Texture,
 };
 use std::sync::Arc;
 
@@ -77,6 +78,27 @@ impl Device {
 
     pub fn destroy_sampler(&self, sampler_id: SamplerID) {
         self.inner.destroy_sampler(sampler_id);
+    }
+}
+
+// texture //
+impl Device {
+    pub fn create_texture(&self, image_desc: &ImageDescription, image_view_desc: &ImageViewDescription, index: u32) -> Texture {
+        let img = self.create_image(image_desc);
+        let img_view = self.create_image_view(img, image_view_desc);
+
+        self.write_image(&ImageWriteInfo {
+            view: img_view,
+            image_descriptor_type: crate::ImageDescriptorType::SampledImage,
+            index: index,
+        });
+
+        return Texture { image: img, image_view: img_view };
+    }
+
+    pub fn destory_texture(&self, texture: Texture) {
+        self.destroy_image(texture.image);
+        self.destroy_image_view(texture.image_view);
     }
 }
 

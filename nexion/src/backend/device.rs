@@ -3,7 +3,7 @@ use crate::{
     *,
 };
 
-use ash::vk;
+use ash::vk::{self, MemoryPropertyFlags};
 use std::sync::{Arc, RwLock};
 use vk_mem::*;
 
@@ -50,6 +50,27 @@ impl InnerDevice {
     pub(crate) fn new(device_desc: &DeviceDescription, instance: Arc<InnerInstance>) -> InnerDevice {
         // Required device extensions (swapchain needed for presentation)
         let mut device_extensions = vec![ash::khr::swapchain::NAME.as_ptr(), ash::khr::synchronization2::NAME.as_ptr()];
+
+        if device_desc.ray_tracing {
+            device_extensions.push(ash::khr::acceleration_structure::NAME.as_ptr());
+            device_extensions.push(ash::khr::ray_tracing_pipeline::NAME.as_ptr());
+            device_extensions.push(ash::khr::deferred_host_operations::NAME.as_ptr());
+            if !device_extensions.contains(&ash::khr::spirv_1_4::NAME.as_ptr()) {
+                device_extensions.push(ash::khr::spirv_1_4::NAME.as_ptr());
+            }
+        }
+
+        if device_desc.atomic_float_operations {
+            device_extensions.push(ash::ext::shader_atomic_float::NAME.as_ptr());
+        }
+
+        if device_desc.mesh_shaders {
+            device_extensions.push(ash::ext::mesh_shader::NAME.as_ptr());
+            device_extensions.push(ash::khr::shader_float_controls::NAME.as_ptr());
+            if !device_extensions.contains(&ash::khr::spirv_1_4::NAME.as_ptr()) {
+                device_extensions.push(ash::khr::spirv_1_4::NAME.as_ptr());
+            }
+        }
 
         let physical_device = {
             let dev = Self::select_physical_device(&instance, &device_extensions);
@@ -101,30 +122,24 @@ impl InnerDevice {
         let mut buffer_device_address = vk::PhysicalDeviceBufferDeviceAddressFeatures::default().buffer_device_address(true);
         let mut vk_features_11 = vk::PhysicalDeviceVulkan11Features::default().shader_draw_parameters(true);
 
-        // ----> CONDITIONAL RAY TRACING ADDITIONS <----
+        // Ray tracing
         let mut accel_struct_features = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default();
         let mut rt_pipeline_features = vk::PhysicalDeviceRayTracingPipelineFeaturesKHR::default();
         let mut ray_query_features = vk::PhysicalDeviceRayQueryFeaturesKHR::default();
 
         if device_desc.ray_tracing {
-            // Add RT extensions
-            device_extensions.push(ash::khr::acceleration_structure::NAME.as_ptr());
-            device_extensions.push(ash::khr::ray_tracing_pipeline::NAME.as_ptr());
-            device_extensions.push(ash::khr::deferred_host_operations::NAME.as_ptr());
-
-            // Enable the Vulkan features
             accel_struct_features = accel_struct_features.acceleration_structure(true);
             rt_pipeline_features = rt_pipeline_features.ray_tracing_pipeline(true);
-
-            // Optional: RT queries inside shaders
             ray_query_features = ray_query_features.ray_query(true);
         }
 
-        if device_desc.atomic_float_operations {
-            device_extensions.push(ash::ext::shader_atomic_float::NAME.as_ptr());
+        // mesh shaders
+        let mut mesh_shader_features = vk::PhysicalDeviceMeshShaderFeaturesEXT::default();
+
+        if device_desc.mesh_shaders {
+            mesh_shader_features = mesh_shader_features.mesh_shader(true).task_shader(true);
         }
 
-        // ----> Build final feature2 chain <----
         let mut features2 = vk::PhysicalDeviceFeatures2::default()
             .push_next(&mut indexing_features)
             .push_next(&mut dynamic_rendering_features)
@@ -132,9 +147,9 @@ impl InnerDevice {
             .push_next(&mut timeline_sem)
             .push_next(&mut buffer_device_address)
             .push_next(&mut vk_features_11)
+            .push_next(&mut mesh_shader_features)
             .features(features);
 
-        // Add ray tracing feature structs *only if* enabled
         if device_desc.ray_tracing {
             features2 = features2.push_next(&mut accel_struct_features).push_next(&mut rt_pipeline_features).push_next(&mut ray_query_features);
         }
@@ -305,6 +320,7 @@ impl InnerDevice {
 
         if buffer_desc.create_mapped {
             allocation_create_info.flags = AllocationCreateFlags::MAPPED | AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE;
+            allocation_create_info.required_flags = MemoryPropertyFlags::HOST_COHERENT;
         }
 
         let (buffer, allocation) = unsafe { self.allocator.create_buffer(&buffer_create_info, &allocation_create_info).expect("Failed to create buffer") };

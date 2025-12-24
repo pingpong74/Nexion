@@ -41,8 +41,7 @@ impl Renderer {
             &DeviceDescription {
                 use_compute_queue: true,
                 use_transfer_queue: true,
-                ray_tracing: false,
-                atomic_float_operations: false,
+                ..Default::default()
             },
             &SwapchainDescription {
                 image_count: 3,
@@ -63,7 +62,7 @@ impl Renderer {
                     size: size_of::<MyPushConstants>() as u32,
                 },
                 outputs: PipelineOutputs {
-                    color: vec![Format::Rgba16Float],
+                    color: &[Format::Rgba16Float],
                     depth: None,
                     stencil: None,
                 },
@@ -139,7 +138,7 @@ impl Renderer {
                 rendering_flags: RenderingFlags::None,
                 view_mask: 0,
                 layer_count: 1,
-                color_attachments: vec![RenderingAttachment {
+                color_attachments: &[RenderingAttachment {
                     image_view: img_view,
                     image_layout: ImageLayout::ColorAttachment,
                     clear_value: ClearValue::ColorFloat([0.2, 0.2, 0.4, 1.0]),
@@ -180,13 +179,13 @@ impl Renderer {
 
         self.vk_context.submit(&QueueSubmitInfo {
             fence: Some(self.frame_data[self.curr_frame].fence),
-            command_buffers: vec![exec_buffer],
-            wait_semaphores: vec![SemaphoreInfo {
+            command_buffers: &[exec_buffer],
+            wait_semaphores: &[SemaphoreInfo {
                 semaphore: image_semaphore,
                 pipeline_stage: PipelineStage::ColorAttachmentOutput,
                 value: None,
             }],
-            signal_semaphores: vec![SemaphoreInfo {
+            signal_semaphores: &[SemaphoreInfo {
                 semaphore: present_semaphore,
                 pipeline_stage: PipelineStage::BottomOfPipe,
                 value: None,

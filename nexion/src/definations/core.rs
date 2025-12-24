@@ -1,6 +1,3 @@
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-use std::sync::Arc;
-
 /// Represents the Vulkan API version used by the application.
 /// Basically useless as only Vulkan 1.3 is used. Kept for future proofing
 #[repr(u32)]
@@ -21,8 +18,21 @@ pub struct InstanceDescription {
 pub struct DeviceDescription {
     pub use_compute_queue: bool,
     pub use_transfer_queue: bool,
+    pub mesh_shaders: bool,
     pub atomic_float_operations: bool,
     pub ray_tracing: bool,
+}
+
+impl Default for DeviceDescription {
+    fn default() -> Self {
+        return DeviceDescription {
+            use_compute_queue: true,
+            use_transfer_queue: true,
+            mesh_shaders: false,
+            atomic_float_operations: false,
+            ray_tracing: false,
+        };
+    }
 }
 
 /// High level swapchain description

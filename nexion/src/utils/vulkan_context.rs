@@ -1,4 +1,4 @@
-use crate::*;
+use crate::{utils::texture::Texture, *};
 use delegate::delegate;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
@@ -52,6 +52,9 @@ impl VulkanContext {
             //Sampler
             pub fn create_sampler(&self, sampler_desc: &SamplerDescription) -> SamplerID;
             pub fn destroy_sampler(&self, sampler_id: SamplerID);
+            //Texture
+            pub fn create_texture(&self, image_desc: &ImageDescription, image_view_desc: &ImageViewDescription, index: u32) -> Texture;
+            pub fn destory_texture(&self, texture: Texture);
             // Descriptors
             pub fn write_buffer(&self, buffer_write_info: &BufferWriteInfo);
             pub fn write_image(&self, image_write_info: &ImageWriteInfo);

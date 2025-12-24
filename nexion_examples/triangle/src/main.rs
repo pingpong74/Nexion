@@ -1,5 +1,8 @@
 use image::ImageReader;
-use nexion::*;
+use nexion::{
+    utils::texture::{Texture, TextureWriteInfo},
+    *,
+};
 use std::time::Instant;
 use winit::{
     application::ApplicationHandler, event::WindowEvent, event_loop::EventLoop, window::Window,
@@ -30,8 +33,7 @@ struct VulkanApp {
     raster_pipeline: RasterizationPipeline,
     vertex_buffer: BufferID,
     color_buffer: BufferID,
-    texture_image: ImageID,
-    texture_image_view: ImageViewID,
+    texture: Texture,
     texture_sampler: SamplerID,
     time: f32,
     frame_data: [FrameData; FRAME_IN_FLIGHT],
@@ -60,8 +62,7 @@ impl VulkanApp {
         let device = instance.create_device(&DeviceDescription {
             use_compute_queue: true,
             use_transfer_queue: true,
-            ray_tracing: false,
-            atomic_float_operations: false,
+            ..Default::default()
         });
 
         let swapchain = device.create_swapchain(
@@ -80,7 +81,7 @@ impl VulkanApp {
                 vertex_shader_path: "shaders/vertex_shader.slang",
                 fragment_shader_path: "shaders/fragment_shader.slang",
                 outputs: PipelineOutputs {
-                    color: vec![Format::Rgba16Float],
+                    color: &[Format::Rgba16Float],
                     depth: None,
                     stencil: None,
                 },
@@ -122,31 +123,20 @@ impl VulkanApp {
         let (width, height) = img_file.dimensions();
         let bytes = img_file.into_raw();
 
-        let texture_image = device.create_image(&ImageDescription {
-            usage: ImageUsage::SAMPLED | ImageUsage::TRANSFER_DST,
-            format: Format::Rgba8Unorm,
-            image_type: ImageType::Type2D,
-            extent: Extent3D {
-                width: width,
-                height: height,
-                depth: 1,
+        let texture = device.create_texture(
+            &ImageDescription {
+                usage: ImageUsage::SAMPLED | ImageUsage::TRANSFER_DST,
+                format: Format::Rgba8Unorm,
+                extent: Extent3D {
+                    width: width,
+                    height: height,
+                    depth: 1,
+                },
+                memory_type: MemoryType::DeviceLocal,
+                ..Default::default()
             },
-            memory_type: MemoryType::DeviceLocal,
-            mip_levels: 1,
-            array_layers: 1,
-            samples: SampleCount::Type1,
-        });
-
-        let texture_img_view = device.create_image_view(
-            texture_image,
-            &ImageViewDescription {
-                view_type: ImageViewType::Type2D,
-                aspect: ImageAspect::Color,
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: 1,
-            },
+            &ImageViewDescription::default(),
+            3,
         );
 
         let texture_sampler = device.create_sampler(&SamplerDescription {
@@ -182,64 +172,35 @@ impl VulkanApp {
         let exec_cmd = recorder.end_recording();
         device.submit(&QueueSubmitInfo {
             fence: None,
-            command_buffers: vec![exec_cmd],
-            wait_semaphores: vec![],
-            signal_semaphores: vec![],
+            command_buffers: &[exec_cmd],
+            wait_semaphores: &[],
+            signal_semaphores: &[],
         });
         device.wait_queue(QueueType::Graphics);
 
+        device.write_data_to_buffer(staging_buffer, bytes.as_slice());
+
         recorder.reset();
         recorder.begin_recording(CommandBufferUsage::OneTimeSubmit);
-        recorder.pipeline_barrier(&[Barrier::Image(ImageBarrier {
-            image: texture_image,
-            old_layout: ImageLayout::Undefined,
-            new_layout: ImageLayout::TransferDst,
-            src_access: AccessType::None,
-            dst_access: AccessType::TransferWrite,
-            dst_stage: PipelineStage::Transfer,
-            ..Default::default()
-        })]);
-        recorder.copy_buffer_to_image(&BufferImageCopyInfo {
-            src_buffer: staging_buffer,
-            dst_image: texture_image,
-            dst_image_layout: ImageLayout::TransferDst,
-            region: BufferImageCopyRegion {
+        texture.write(
+            &mut recorder,
+            &TextureWriteInfo {
+                stg_buffer: staging_buffer,
                 buffer_offset: 0,
-                buffer_row_length: 0,
-                buffer_image_height: 0,
-                image_subresource: ImageSubresourceLayers {
-                    aspect: ImageAspect::Color,
-                    mip_level: 0,
-                    level_count: 1,
-                    base_array_layer: 0,
-                    layer_count: 1,
-                },
-                image_offset: Offset3D { x: 0, y: 0, z: 0 },
-                image_extent: Extent3D {
-                    width: width,
-                    height: height,
-                    depth: 1,
-                },
+                width: width,
+                height: height,
+                src_queue: QueueType::Graphics,
+                dst_queue: QueueType::Graphics,
             },
-        });
-        recorder.pipeline_barrier(&[Barrier::Image(ImageBarrier {
-            image: texture_image,
-            old_layout: ImageLayout::TransferDst,
-            new_layout: ImageLayout::ShaderReadOnly,
-            src_stage: PipelineStage::Transfer,
-            dst_stage: PipelineStage::FragmentShader,
-            src_access: AccessType::TransferWrite,
-            dst_access: AccessType::ShaderRead,
-            ..Default::default()
-        })]);
+        );
 
         let exec_buffer = recorder.end_recording();
 
         device.submit(&QueueSubmitInfo {
             fence: None,
-            command_buffers: vec![exec_buffer],
-            wait_semaphores: vec![],
-            signal_semaphores: vec![],
+            command_buffers: &[exec_buffer],
+            wait_semaphores: &[],
+            signal_semaphores: &[],
         });
         device.wait_queue(QueueType::Graphics);
 
@@ -259,11 +220,7 @@ impl VulkanApp {
             range: 12,
             index: 0,
         });
-        device.write_image(&ImageWriteInfo {
-            view: texture_img_view,
-            image_descriptor_type: ImageDescriptorType::SampledImage,
-            index: 0,
-        });
+
         device.write_sampler(&SamplerWriteInfo {
             sampler: texture_sampler,
             index: 0,
@@ -292,8 +249,7 @@ impl VulkanApp {
             raster_pipeline: raster_pipeline,
             vertex_buffer: vertex_buffer,
             color_buffer: color_buffer,
-            texture_image: texture_image,
-            texture_image_view: texture_img_view,
+            texture: texture,
             texture_sampler: texture_sampler,
             time: 0.0,
         };
@@ -360,7 +316,7 @@ impl VulkanApp {
                 rendering_flags: RenderingFlags::None,
                 view_mask: 0,
                 layer_count: 1,
-                color_attachments: vec![RenderingAttachment {
+                color_attachments: &[RenderingAttachment {
                     image_view: img_view,
                     image_layout: ImageLayout::ColorAttachment,
                     clear_value: ClearValue::ColorFloat([0.2, 0.2, 0.4, 1.0]),
@@ -400,13 +356,13 @@ impl VulkanApp {
 
         self.device.submit(&QueueSubmitInfo {
             fence: Some(self.frame_data[curr_frame].fence),
-            command_buffers: vec![exec_buffer],
-            wait_semaphores: vec![SemaphoreInfo {
+            command_buffers: &[exec_buffer],
+            wait_semaphores: &[SemaphoreInfo {
                 semaphore: image_semaphore,
                 pipeline_stage: PipelineStage::ColorAttachmentOutput,
                 value: None,
             }],
-            signal_semaphores: vec![SemaphoreInfo {
+            signal_semaphores: &[SemaphoreInfo {
                 semaphore: present_semaphore,
                 pipeline_stage: PipelineStage::BottomOfPipe,
                 value: None,
@@ -427,8 +383,7 @@ impl Drop for VulkanApp {
         self.device.destroy_buffer(self.vertex_buffer);
         self.device.destroy_buffer(self.color_buffer);
 
-        self.device.destroy_image_view(self.texture_image_view);
-        self.device.destroy_image(self.texture_image);
+        self.device.destory_texture(self.texture);
         self.device.destroy_sampler(self.texture_sampler);
 
         for i in 0..FRAME_IN_FLIGHT {

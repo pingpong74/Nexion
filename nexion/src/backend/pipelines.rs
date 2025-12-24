@@ -1,8 +1,7 @@
 use ahash::{HashMap, HashMapExt};
 use ash::vk;
-use smallvec::smallvec;
 
-use crate::{BufferID, RayTracingPipelineDescription, backend::device::InnerDevice, *};
+use crate::{PushConstantsDescription, backend::device::InnerDevice};
 
 use serde::{Deserialize, Serialize};
 
@@ -643,7 +642,7 @@ impl InnerPipelineManager {
 pub(crate) struct InnerRasterizationPipeline {
     pub(crate) handle: vk::Pipeline,
     pub(crate) layout: vk::PipelineLayout,
-    pub(crate) desc: RasterizationPipelineDescription,
+    pub(crate) pc_info: PushConstantsDescription,
     pub(crate) manager: Arc<InnerPipelineManager>,
 }
 
@@ -670,11 +669,4 @@ impl Drop for InnerComputePipeline {
             self.manager.device.handle.destroy_pipeline_layout(self.layout, None);
         }
     }
-}
-
-pub(crate) struct ShaderBindingTable {
-    pub(crate) buffer: BufferID,
-    pub(crate) rgen: vk::StridedDeviceAddressRegionKHR,
-    pub(crate) miss: vk::StridedDeviceAddressRegionKHR,
-    pub(crate) hit: vk::StridedDeviceAddressRegionKHR,
 }
