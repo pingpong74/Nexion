@@ -9,3 +9,8 @@ resolver = "2"
 
 [patch.crates-io]
 vk-mem = { path = "vendor/vk-mem-rs" }
+
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1
