@@ -11,6 +11,9 @@ repository = "https://github.com/pingpong74/Nexion"
 [lib]
 path = "src/lib.rs"
 
+[patch.crates-io]
+vk-mem = { path = "vendor/vk-mem-rs" }
+
 [dependencies]
 ash                 = { version = "0.38.0", features = ["linked"] }
 vk-mem              = "0.5.0"
