@@ -3,3 +3,4 @@ nexion/target
 nexion/rustfmt.toml
 nexion_examples/triangle/.cache
 nexion_examples/fractal/.cache
+vendor

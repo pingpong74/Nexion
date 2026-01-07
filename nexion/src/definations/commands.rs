@@ -284,19 +284,17 @@ pub struct DispatchIndirectInfo {
     pub offset: u64,
 }
 
-pub struct CopyRegions {
+// Copy commands
+pub struct CopyRegion {
     pub src_offset: u64,
     pub dst_offset: u64,
     pub size: u64,
 }
 
-// Copy commands
 pub struct BufferCopyInfo {
     pub src_buffer: BufferID,
     pub dst_buffer: BufferID,
-    pub src_offset: u64,
-    pub dst_offset: u64,
-    pub size: u64,
+    pub regions: Vec<CopyRegion>,
 }
 
 pub struct BufferFillInfo {
@@ -557,6 +555,10 @@ pub enum Barrier {
     Image(ImageBarrier),
     Buffer(BufferBarrier),
 }
+
+// Mesh shaders
+
+pub struct DrawMeshTasksIndirect {}
 
 //Submit info
 pub struct SemaphoreInfo {

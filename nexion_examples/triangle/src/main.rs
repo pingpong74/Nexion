@@ -77,8 +77,11 @@ impl VulkanApp {
         let pipeline_manager = device.create_pipeline_manager();
         let raster_pipeline =
             pipeline_manager.create_rasterization_pipeline(&RasterizationPipelineDescription {
-                vertex_input: MyVertex::vertex_input_description(),
-                vertex_shader_path: "shaders/vertex_shader.slang",
+                geometry: GeometryStage::Classic {
+                    vertex_input: MyVertex::vertex_input_description(),
+                    topology: InputTopology::TriangleList,
+                    vertex_shader: "shaders/vertex_shader.slang",
+                },
                 fragment_shader_path: "shaders/fragment_shader.slang",
                 outputs: PipelineOutputs {
                     color: &[Format::Rgba16Float],
@@ -165,9 +168,11 @@ impl VulkanApp {
         recorder.copy_buffer(&BufferCopyInfo {
             src_buffer: staging_buffer,
             dst_buffer: vertex_buffer,
-            size: 96,
-            src_offset: 0,
-            dst_offset: 0,
+            regions: vec![CopyRegion {
+                size: 96,
+                src_offset: 0,
+                dst_offset: 0,
+            }],
         });
         let exec_cmd = recorder.end_recording();
         device.submit(&QueueSubmitInfo {

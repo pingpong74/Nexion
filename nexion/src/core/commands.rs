@@ -358,12 +358,13 @@ impl CommandRecorder {
         let src_buffer = self.check_and_remeber_buffer_id(buffer_copy_info.src_buffer);
         let dst_buffer = self.check_and_remeber_buffer_id(buffer_copy_info.dst_buffer);
 
-        let copy_region = vk::BufferCopy2::default()
-            .src_offset(buffer_copy_info.src_offset)
-            .dst_offset(buffer_copy_info.dst_offset)
-            .size(buffer_copy_info.size);
+        let copy_regions: Vec<vk::BufferCopy2> = buffer_copy_info
+            .regions
+            .iter()
+            .map(|copy_info| vk::BufferCopy2::default().dst_offset(copy_info.dst_offset).src_offset(copy_info.src_offset).size(copy_info.size))
+            .collect();
 
-        let copy_info = vk::CopyBufferInfo2::default().src_buffer(src_buffer).dst_buffer(dst_buffer).regions(std::slice::from_ref(&copy_region));
+        let copy_info = vk::CopyBufferInfo2::default().src_buffer(src_buffer).dst_buffer(dst_buffer).regions(copy_regions.as_slice());
 
         unsafe {
             self.device.handle.cmd_copy_buffer2(self.current_commad_buffer, &copy_info);
@@ -513,6 +514,8 @@ impl CommandRecorder {
             self.device.handle.cmd_blit_image2(self.current_commad_buffer, &blit_info);
         }
     }
+
+    //// Mesh shaders ////
 }
 
 impl CommandRecorder {

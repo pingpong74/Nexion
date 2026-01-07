@@ -34,7 +34,7 @@ impl Texture {
             image: self.image,
             dst_image_layout: ImageLayout::TransferDst,
             region: BufferImageCopyRegion {
-                buffer_offset: 0,
+                buffer_offset: texture_write_info.buffer_offset,
                 buffer_row_length: 0,
                 buffer_image_height: 0,
                 image_subresource: ImageSubresourceLayers {

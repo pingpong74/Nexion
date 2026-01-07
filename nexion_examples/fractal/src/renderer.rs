@@ -52,7 +52,11 @@ impl Renderer {
 
         let pipeline =
             vk_context.create_rasterization_pipeline(&RasterizationPipelineDescription {
-                vertex_shader_path: "shaders/vertex.slang",
+                geometry: GeometryStage::Classic {
+                    vertex_input: VertexInputDescription::default(),
+                    topology: InputTopology::TriangleList,
+                    vertex_shader: "shaders/vertex.slang",
+                },
                 fragment_shader_path: "shaders/fragment.slang",
                 cull_mode: CullMode::Back,
                 front_face: FrontFace::Clockwise,

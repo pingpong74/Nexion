@@ -1,0 +1,11 @@
+[workspace]
+members = [
+    "nexion",
+    "nexion_examples/triangle",
+    "nexion_examples/fractal",
+    "vendor/vk-mem-rs"
+]
+resolver = "2"
+
+[patch.crates-io]
+vk-mem = { path = "vendor/vk-mem-rs" }

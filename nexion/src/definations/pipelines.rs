@@ -301,12 +301,24 @@ impl Default for PushConstantsDescription {
 }
 
 #[derive(Clone)]
+pub enum GeometryStage<'a> {
+    Classic {
+        vertex_input: VertexInputDescription,
+        topology: InputTopology,
+        vertex_shader: &'a str,
+    },
+    Mesh {
+        task_shader: Option<&'a str>,
+        mesh_shader: &'a str,
+    },
+}
+
+#[derive(Clone)]
 pub struct RasterizationPipelineDescription<'a> {
-    pub vertex_input: VertexInputDescription,
+    pub geometry: GeometryStage<'a>,
+    pub fragment_shader_path: &'a str,
+
     pub push_constants: PushConstantsDescription,
-    pub topology: InputTopology,
-    pub vertex_shader_path: &'static str,
-    pub fragment_shader_path: &'static str,
     pub cull_mode: CullMode,
     pub front_face: FrontFace,
     pub polygon_mode: PolygonMode,
@@ -318,10 +330,12 @@ pub struct RasterizationPipelineDescription<'a> {
 impl<'a> Default for RasterizationPipelineDescription<'a> {
     fn default() -> Self {
         Self {
-            vertex_input: VertexInputDescription::default(),
+            geometry: GeometryStage::Classic {
+                vertex_input: VertexInputDescription::default(),
+                topology: InputTopology::TriangleList,
+                vertex_shader: " ",
+            },
             push_constants: PushConstantsDescription::default(),
-            topology: InputTopology::TriangleList,
-            vertex_shader_path: " ",
             fragment_shader_path: " ",
             cull_mode: CullMode::None,
             front_face: FrontFace::CounterClockwise,
