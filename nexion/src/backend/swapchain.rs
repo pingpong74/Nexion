@@ -1,5 +1,6 @@
 use ash::vk;
 use crossbeam::queue::ArrayQueue;
+use gpu_allocator::vulkan::Allocation;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 
@@ -124,15 +125,7 @@ impl InnerSwapchain {
             .map(|&image| {
                 let id = device.image_pool.write().unwrap().add(crate::backend::gpu_resources::ImageSlot {
                     handle: image,
-                    allocation: vk_mem::Allocation(std::ptr::null_mut()),
-                    alloc_info: vk_mem::AllocationInfo {
-                        memory_type: 0,
-                        device_memory: vk::DeviceMemory::null(),
-                        user_data: 0,
-                        mapped_data: std::ptr::null_mut(),
-                        offset: 0,
-                        size: 0,
-                    },
+                    allocation: Allocation::default(),
                     format: surface_format.format,
                 });
 

@@ -3,9 +3,12 @@ use crate::{
     *,
 };
 
-use ash::vk::{self, MemoryPropertyFlags};
-use std::sync::{Arc, RwLock};
-use vk_mem::*;
+use ash::vk::{self, BufferDeviceAddressInfo, ImageCreateInfo};
+use gpu_allocator::{vulkan::*, *};
+use std::{
+    cell::UnsafeCell,
+    sync::{Arc, RwLock},
+};
 
 pub(crate) struct QueueFamilyIndices {
     pub graphics_family: Option<u32>,
@@ -28,7 +31,7 @@ pub(crate) struct PhysicalDevice {
 // TODO: Should i use an unsafe cell instead of RwLock?
 
 pub(crate) struct InnerDevice {
-    pub(crate) allocator: Allocator,
+    pub(crate) allocator: UnsafeCell<Allocator>,
     pub(crate) handle: ash::Device,
     pub(crate) physical_device: PhysicalDevice,
     pub(crate) instance: Arc<InnerInstance>,
@@ -165,11 +168,15 @@ impl InnerDevice {
 
         let dev = unsafe { instance.handle.create_device(physical_device.handle, &create_info, None).expect("Failed to create logical device") };
 
-        let mut allocator_create_info = vk_mem::AllocatorCreateInfo::new(&instance.handle, &dev, physical_device.handle);
-        allocator_create_info.vulkan_api_version = instance.api_version.clone() as u32;
-        allocator_create_info.flags = vk_mem::AllocatorCreateFlags::EXTERNALLY_SYNCHRONIZED | vk_mem::AllocatorCreateFlags::BUFFER_DEVICE_ADDRESS;
-
-        let allocator = unsafe { vk_mem::Allocator::new(allocator_create_info).expect("Failed to create vma allocator") };
+        let allocator = Allocator::new(&AllocatorCreateDesc {
+            instance: instance.handle.clone(),
+            device: dev.clone(),
+            physical_device: physical_device.handle,
+            debug_settings: AllocatorDebugSettings::default(),
+            buffer_device_address: true,
+            allocation_sizes: AllocationSizes::default(),
+        })
+        .expect("Failed to create allocator");
 
         let bindless_desc = GpuBindlessDescriptorPool::new(&dev, 100, 100, 100, 100);
 
@@ -180,7 +187,7 @@ impl InnerDevice {
         return InnerDevice {
             handle: dev,
             physical_device: physical_device,
-            allocator: allocator,
+            allocator: UnsafeCell::new(allocator),
             instance: instance,
 
             //Resource Pools
@@ -313,37 +320,39 @@ impl InnerDevice {
             .sharing_mode(vk::SharingMode::CONCURRENT)
             .queue_family_indices(&indices);
 
-        let mut allocation_create_info = vk_mem::AllocationCreateInfo {
-            usage: buffer_desc.memory_type.to_vk_flag(),
-            ..Default::default()
+        let buffer = unsafe { self.handle.create_buffer(&buffer_create_info, None).expect("Failed to create buffer ") };
+        let memory_requirements = unsafe { self.handle.get_buffer_memory_requirements(buffer) };
+
+        let allocation_create_info = AllocationCreateDesc {
+            name: "o",
+            requirements: memory_requirements,
+            location: buffer_desc.memory_type.to_vk_flag(),
+            linear: true,
+            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
         };
 
-        if buffer_desc.create_mapped {
-            allocation_create_info.flags = AllocationCreateFlags::MAPPED | AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE;
-            allocation_create_info.required_flags = MemoryPropertyFlags::HOST_COHERENT;
+        let allocation = unsafe { self.allocator.get().as_mut().unwrap().allocate(&allocation_create_info).expect("Failed to allocate memory on device") };
+
+        unsafe {
+            self.handle.bind_buffer_memory(buffer, allocation.memory(), allocation.offset()).expect("Failed to bind buffer memory");
         }
+        let buffer_address = unsafe { self.handle.get_buffer_device_address(&BufferDeviceAddressInfo::default().buffer(buffer)) };
 
-        let (buffer, allocation) = unsafe { self.allocator.create_buffer(&buffer_create_info, &allocation_create_info).expect("Failed to create buffer") };
-
-        let alloc_info = self.allocator.get_allocation_info(&allocation);
-
-        let buffer_address = unsafe { self.handle.get_buffer_device_address(&vk::BufferDeviceAddressInfo::default().buffer(buffer)) };
-
-        let id = self.buffer_pool.write().unwrap().add(BufferSlot {
+        let raw_id = self.buffer_pool.write().unwrap().add(BufferSlot {
             handle: buffer,
             address: buffer_address,
             allocation: allocation,
-            alloc_info: alloc_info,
         });
 
-        return BufferID { id: id };
+        return BufferID { id: raw_id };
     }
 
     pub(crate) fn destroy_buffer(&self, id: BufferID) {
-        let mut res = self.buffer_pool.write().unwrap().delete(id.id);
+        let res = self.buffer_pool.write().unwrap().delete(id.id);
 
         unsafe {
-            self.allocator.destroy_buffer(res.handle, &mut res.allocation);
+            self.allocator.get().as_mut().unwrap().free(res.allocation).expect("Failed to deallocate buffer");
+            self.handle.destroy_buffer(res.handle, None);
         }
     }
 
@@ -352,7 +361,7 @@ impl InnerDevice {
         let buffer = buffer_pool.get_ref(buffer_id.id);
 
         unsafe {
-            let ptr = buffer.alloc_info.mapped_data as *mut T;
+            let ptr = buffer.allocation.mapped_ptr().expect("Tried to write to an unmapped buffer").as_ptr() as *mut T;
             std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
         }
     }
@@ -361,7 +370,7 @@ impl InnerDevice {
         let buffer_pool = self.buffer_pool.read().unwrap();
         let buffer = buffer_pool.get_ref(buffer_id.id);
 
-        return buffer.alloc_info.mapped_data as *mut u8;
+        return buffer.allocation.mapped_ptr().expect("Tried to write to an unmapped buffer").as_ptr() as *mut u8;
     }
 }
 
@@ -379,19 +388,27 @@ impl InnerDevice {
             .samples(image_desc.samples.to_vk_flags())
             .tiling(vk::ImageTiling::OPTIMAL);
 
-        let allocation_create_info = vk_mem::AllocationCreateInfo {
-            usage: image_desc.memory_type.to_vk_flag(),
-            ..Default::default()
+        let image = unsafe { self.handle.create_image(&image_create_info, None).expect("Failed to create Image") };
+
+        let memory_requirements = unsafe { self.handle.get_image_memory_requirements(image) };
+
+        let allocation_create_info = AllocationCreateDesc {
+            name: "o",
+            requirements: memory_requirements,
+            location: image_desc.memory_type.to_vk_flag(),
+            linear: true,
+            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
         };
 
-        let (image, allocation) = unsafe { self.allocator.create_image(&image_create_info, &allocation_create_info).expect("Failed to create image") };
+        let allocation = unsafe { self.allocator.get().as_mut().unwrap().allocate(&allocation_create_info).expect("Failed to allocate memory on device") };
 
-        let alloc_info = self.allocator.get_allocation_info(&allocation);
+        unsafe {
+            self.handle.bind_image_memory(image, allocation.memory(), allocation.offset()).expect("Failed to bind image memory");
+        }
 
         let id = self.image_pool.write().unwrap().add(ImageSlot {
             handle: image,
             allocation: allocation,
-            alloc_info: alloc_info,
             format: image_desc.format.to_vk_format(),
         });
 
@@ -399,10 +416,11 @@ impl InnerDevice {
     }
 
     pub(crate) fn destroy_image(&self, id: ImageID) {
-        let mut img = self.image_pool.write().unwrap().delete(id.id);
+        let img = self.image_pool.write().unwrap().delete(id.id);
 
         unsafe {
-            self.allocator.destroy_image(img.handle, &mut img.allocation);
+            self.allocator.get().as_mut().unwrap().free(img.allocation).expect("Failed to deallocate image");
+            self.handle.destroy_image(img.handle, None);
         };
     }
 }
@@ -516,7 +534,7 @@ impl InnerDevice {
 
 //// Command buffers ////
 impl InnerDevice {
-    pub(crate) fn createcmd_recorder_data(&self, queue_type: QueueType) -> vk::CommandPool {
+    pub(crate) fn create_cmd_recorder_data(&self, queue_type: QueueType) -> vk::CommandPool {
         let cmd_pool_info = vk::CommandPoolCreateInfo::default().flags(vk::CommandPoolCreateFlags::empty()).queue_family_index(match queue_type {
             QueueType::Compute => self.physical_device.queue_families.compute_family.unwrap(),
             QueueType::Transfer => self.physical_device.queue_families.transfer_family.unwrap(),
@@ -668,3 +686,6 @@ impl Drop for InnerDevice {
         }
     }
 }
+
+unsafe impl Send for InnerDevice {}
+unsafe impl Sync for InnerDevice {}

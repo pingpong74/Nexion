@@ -1,21 +1,17 @@
 use std::u64::MAX;
 
 use ash::vk;
-use vk_mem::*;
+use gpu_allocator::vulkan::*;
 
-#[derive(Clone)]
 pub(crate) struct BufferSlot {
     pub(crate) handle: vk::Buffer,
     pub(crate) address: vk::DeviceAddress,
     pub(crate) allocation: Allocation,
-    pub(crate) alloc_info: AllocationInfo,
 }
 
-#[derive(Clone)]
 pub(crate) struct ImageSlot {
     pub(crate) handle: vk::Image,
     pub(crate) allocation: Allocation,
-    pub(crate) alloc_info: AllocationInfo,
     pub(crate) format: vk::Format,
 }
 
@@ -41,9 +37,6 @@ fn decode_as_usize(id: u64) -> (usize, usize, u64) {
     return (((id >> 32) & MASK) as usize, ((id >> 16) & MASK) as usize, (id & MASK));
 }
 
-// Be careful while changing!!!!!!!!
-// its used in shader as well. (common.slang)
-// both values MUST match!!
 const PAGE_SIZE: usize = 10;
 
 /// Assinging 16 bits to each of the numbers, paging, index and version

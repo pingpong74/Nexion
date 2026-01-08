@@ -3,6 +3,8 @@ use std::ops::BitOr;
 
 use crate::Extent3D;
 
+use gpu_allocator::MemoryLocation;
+
 /// Specifies the desired properties for a memory allocation.
 ///
 /// These variants typically correspond to strategies for choosing
@@ -27,11 +29,11 @@ pub enum MemoryType {
 }
 
 impl MemoryType {
-    pub(crate) const fn to_vk_flag(&self) -> vk_mem::MemoryUsage {
+    pub(crate) const fn to_vk_flag(&self) -> MemoryLocation {
         match self {
-            Self::DeviceLocal => vk_mem::MemoryUsage::AutoPreferDevice,
-            Self::PreferHost => vk_mem::MemoryUsage::AutoPreferHost,
-            Self::Auto => vk_mem::MemoryUsage::Auto,
+            Self::DeviceLocal => MemoryLocation::GpuOnly,
+            Self::PreferHost => MemoryLocation::CpuToGpu,
+            Self::Auto => MemoryLocation::Unknown,
         }
     }
 }

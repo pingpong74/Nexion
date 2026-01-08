@@ -130,7 +130,7 @@ impl Device {
 impl Device {
     pub fn create_command_recorder(&self, queue_type: QueueType) -> CommandRecorder {
         return CommandRecorder {
-            handle: self.inner.createcmd_recorder_data(queue_type),
+            handle: self.inner.create_cmd_recorder_data(queue_type),
             commad_buffers: smallvec![],
             exec_command_buffers: smallvec![],
             current_commad_buffer: vk::CommandBuffer::null(),
