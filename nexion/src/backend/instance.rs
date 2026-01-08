@@ -1,17 +1,14 @@
-use crate::{ApiVersion, InstanceDescription};
+use crate::InstanceDescription;
 
 use ash::vk;
 //use image::imageops::FilterType::Triangle;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-use std::ffi::CStr;
 
 pub(crate) struct InnerInstance {
     pub(crate) entry: ash::Entry,
     pub(crate) handle: ash::Instance,
     debug_messenger: Option<vk::DebugUtilsMessengerEXT>,
     debug_loader: Option<ash::ext::debug_utils::Instance>,
-    physical_device_extensions: Vec<&'static CStr>,
-    pub(crate) api_version: ApiVersion,
 }
 
 impl InnerInstance {
@@ -94,8 +91,6 @@ impl InnerInstance {
             handle: instance,
             debug_messenger: debug_messenger,
             debug_loader: debug_loader,
-            physical_device_extensions: vec![ash::khr::swapchain::NAME],
-            api_version: instance_create_info.api_version.clone(),
         };
     }
 }

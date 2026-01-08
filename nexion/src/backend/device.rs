@@ -3,7 +3,7 @@ use crate::{
     *,
 };
 
-use ash::vk::{self, BufferDeviceAddressInfo, ImageCreateInfo};
+use ash::vk;
 use gpu_allocator::{vulkan::*, *};
 use std::{
     cell::UnsafeCell,
@@ -25,7 +25,6 @@ impl QueueFamilyIndices {
 pub(crate) struct PhysicalDevice {
     pub handle: vk::PhysicalDevice,
     pub queue_families: QueueFamilyIndices,
-    pub properties: vk::PhysicalDeviceProperties2<'static>,
 }
 
 // TODO: Should i use an unsafe cell instead of RwLock?
@@ -285,11 +284,7 @@ impl InnerDevice {
                 // Prefer larger max image dimension as tiebreaker
                 let score = score + props.properties.limits.max_image_dimension2_d as i32;
 
-                let candidate = PhysicalDevice {
-                    handle: device,
-                    queue_families: qf,
-                    properties: props,
-                };
+                let candidate = PhysicalDevice { handle: device, queue_families: qf };
 
                 if let Some((best_score, _)) = &best_device {
                     if score > *best_score {
@@ -336,7 +331,7 @@ impl InnerDevice {
         unsafe {
             self.handle.bind_buffer_memory(buffer, allocation.memory(), allocation.offset()).expect("Failed to bind buffer memory");
         }
-        let buffer_address = unsafe { self.handle.get_buffer_device_address(&BufferDeviceAddressInfo::default().buffer(buffer)) };
+        let buffer_address = unsafe { self.handle.get_buffer_device_address(&vk::BufferDeviceAddressInfo::default().buffer(buffer)) };
 
         let raw_id = self.buffer_pool.write().unwrap().add(BufferSlot {
             handle: buffer,
@@ -371,6 +366,13 @@ impl InnerDevice {
         let buffer = buffer_pool.get_ref(buffer_id.id);
 
         return buffer.allocation.mapped_ptr().expect("Tried to write to an unmapped buffer").as_ptr() as *mut u8;
+    }
+
+    pub(crate) fn get_device_address(&self, buffer_id: BufferID) -> vk::DeviceAddress {
+        let buffer_pool = self.buffer_pool.read().unwrap();
+        let buffer = buffer_pool.get_ref(buffer_id.id);
+
+        return buffer.address;
     }
 }
 
@@ -452,10 +454,7 @@ impl InnerDevice {
 
         let image_view = unsafe { self.handle.create_image_view(&image_view_create_info, None).expect("Failed to create Image view") };
 
-        let id = self.image_view_pool.write().unwrap().add(ImageViewSlot {
-            handle: image_view,
-            parent_image: img.handle,
-        });
+        let id = self.image_view_pool.write().unwrap().add(ImageViewSlot { handle: image_view });
 
         return ImageViewID { id: id };
     }

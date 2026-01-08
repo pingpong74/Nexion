@@ -46,6 +46,10 @@ impl Device {
     pub fn get_raw_ptr(&self, buffer_id: BufferID) -> *mut u8 {
         return self.inner.get_raw_ptr(buffer_id);
     }
+
+    pub fn get_buffer_address(&self, buffer_id: BufferID) -> vk::DeviceAddress {
+        return self.inner.get_device_address(buffer_id);
+    }
 }
 
 // Image //

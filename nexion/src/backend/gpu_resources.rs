@@ -18,7 +18,6 @@ pub(crate) struct ImageSlot {
 #[derive(Clone)]
 pub(crate) struct ImageViewSlot {
     pub(crate) handle: vk::ImageView,
-    pub(crate) parent_image: vk::Image,
 }
 
 #[derive(Clone)]
