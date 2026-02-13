@@ -1,29 +1,14 @@
 use ash::vk;
-use std::{cell::UnsafeCell, collections::HashMap, path::PathBuf};
+use std::{cell::UnsafeCell, path::PathBuf};
 
 use crate::{
     Pipeline, PushConstantsDescription,
     backend::{device::InnerDevice, gpu_resources::ResourcePool},
 };
 
-use serde::{Deserialize, Serialize};
 
 use crate::{ComputePipelineDescription, GeometryStage, RasterizationPipelineDescription};
-use std::{
-    fs::{self, File},
-    io::{Read, Write},
-    path::Path,
-    process::Command,
-    sync::Arc,
-    time::UNIX_EPOCH,
-};
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub(crate) struct ShaderCacheEntry {
-    slang: String,
-    spv: String,
-    timestamp: u64,
-}
+use std::{fs, path::Path, process::Command, sync::Arc};
 
 #[derive(Clone, Copy)]
 pub(crate) struct PipelineSlot {

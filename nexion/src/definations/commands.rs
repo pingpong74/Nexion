@@ -467,20 +467,6 @@ impl AccessType {
             AccessType::TransferWrite => vk::AccessFlags2::TRANSFER_WRITE,
         }
     }
-
-    pub(crate) fn is_write(&self) -> bool {
-        match self {
-            AccessType::ShaderWrite => true,
-            AccessType::ColorAttachmentWrite => true,
-            AccessType::DepthStencilWrite => true,
-            AccessType::TransferWrite => true,
-            _ => false,
-        }
-    }
-
-    pub(crate) fn is_read(&self) -> bool {
-        !self.is_write()
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

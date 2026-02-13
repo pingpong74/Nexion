@@ -687,6 +687,48 @@ impl Drop for InnerDevice {
         let image_view_pool = unsafe { &mut (*self.image_view_pool.get()) };
         let sampler_pool = unsafe { &mut (*self.sampler_pool.get()) };
 
+        for page in &mut buffer_pool.data {
+            for (res, _) in page {
+                if let Some(slot) = res.take() {
+                    unsafe {
+                        self.allocator.get().as_mut().unwrap().free(slot.allocation).expect("Failed to deallocate buffer");
+                        self.handle.destroy_buffer(slot.handle, None);
+                    }
+                }
+            }
+        }
+
+        for page in &mut image_pool.data {
+            for (res, _) in page {
+                if let Some(slot) = res.take() {
+                    unsafe {
+                        self.allocator.get().as_mut().unwrap().free(slot.allocation).expect("Failed to deallocate buffer");
+                        self.handle.destroy_image(slot.handle, None);
+                    }
+                }
+            }
+        }
+
+        for page in &mut image_view_pool.data {
+            for (res, _) in page {
+                if let Some(slot) = res.take() {
+                    unsafe {
+                        self.handle.destroy_image_view(slot.handle, None);
+                    }
+                }
+            }
+        }
+
+        for page in &mut sampler_pool.data {
+            for (res, _) in page {
+                if let Some(slot) = res.take() {
+                    unsafe {
+                        self.handle.destroy_sampler(slot.handle, None);
+                    }
+                }
+            }
+        }
+
         unsafe {
             self.bindless_descriptors.cleanup(&self.handle, &mut (*self.allocator.get()));
             std::ptr::drop_in_place(&mut self.allocator);

@@ -18,10 +18,6 @@ vertex!(MyVertex {
     uv: [f32; 2],
 });
 
-struct PushConstants {
-    color: u64,
-}
-
 #[allow(unused)]
 struct VulkanApp {
     window: Arc<Window>,
@@ -301,9 +297,7 @@ impl VulkanApp {
         });
 
         self.frame_data[curr_frame].set_push_constants(
-            &PushConstants {
-                color: self.device.get_buffer_address(self.color_buffer),
-            },
+            &self.device.get_buffer_address(self.color_buffer),
             self.raster_pipeline,
         );
         self.frame_data[curr_frame].bind_pipeline(self.raster_pipeline);

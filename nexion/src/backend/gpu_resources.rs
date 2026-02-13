@@ -1,4 +1,4 @@
-use std::{cell::UnsafeCell, u64::MAX};
+use std::cell::UnsafeCell;
 
 use ash::vk;
 use gpu_allocator::vulkan::*;
