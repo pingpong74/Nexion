@@ -1,4 +1,4 @@
-use crate::backend::{device::InnerDevice, instance::InnerInstance};
+use crate::backend::{device::InnerDevice, instance::InnerInstance, pipelines::InnerPipelineManager};
 use std::sync::Arc;
 
 use super::device::Device;
@@ -19,7 +19,11 @@ impl Instance {
     }
 
     pub fn create_device(&self, device_desc: &DeviceDescription) -> Device {
-        let inner_device = InnerDevice::new(device_desc, self.inner.clone());
-        return Device { inner: Arc::new(inner_device) };
+        let inner_device = Arc::new(InnerDevice::new(device_desc, self.inner.clone()));
+        let pipeline_manager = Arc::new(InnerPipelineManager::new(inner_device.clone()));
+        return Device {
+            inner_device: inner_device,
+            pipeline_manager: pipeline_manager,
+        };
     }
 }

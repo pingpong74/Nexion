@@ -30,6 +30,12 @@ impl Application {
                 .create_window(window_attribs)
                 .expect("Failed to create window"),
         );
+
+        window
+            .set_cursor_grab(winit::window::CursorGrabMode::Locked)
+            .expect(":(");
+        window.set_cursor_visible(false);
+
         let size = window.inner_size();
 
         return Application {

@@ -1,5 +1,4 @@
 pub(crate) mod backend;
-
 pub mod core;
 pub mod definations;
 pub mod utils;
@@ -7,10 +6,9 @@ pub mod utils;
 use std::fs;
 use std::path::Path;
 
-pub use core::{commands::*, device::*, gpu_resources::*, instance::*, pipelines::*, swapchain::*};
+pub use core::{commands::*, device::*, gpu_resources::*, instance::*, swapchain::*};
 pub use definations::{commands::*, core::*, gpu_resources::*, pipelines::*};
 
-pub use bytemuck;
 pub use memoffset;
 
 // For copying the nexion.slang file to your directory.
@@ -41,7 +39,7 @@ macro_rules! vertex {
         }
     ) => {
         #[repr(C)]
-        #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+        #[derive(Copy, Clone)]
         pub struct $name {
             $( pub $field: $ty, )*
         }

@@ -18,9 +18,8 @@ vertex!(MyVertex {
     uv: [f32; 2],
 });
 
-struct FrameData {
-    command_recorder: CommandRecorder,
-    fence: Fence,
+struct PushConstants {
+    color: u64,
 }
 
 #[allow(unused)]
@@ -29,14 +28,13 @@ struct VulkanApp {
     instance: Instance,
     device: Device,
     swapchain: Swapchain,
-    pipeline_manager: PipelineManager,
-    raster_pipeline: RasterizationPipeline,
-    vertex_buffer: BufferID,
-    color_buffer: BufferID,
+    raster_pipeline: Pipeline,
+    vertex_buffer: BufferId,
+    color_buffer: BufferId,
     texture: Texture,
-    texture_sampler: SamplerID,
+    texture_sampler: SamplerId,
     time: f32,
-    frame_data: [FrameData; FRAME_IN_FLIGHT],
+    frame_data: [CommandRecorder; FRAME_IN_FLIGHT],
 }
 
 impl VulkanApp {
@@ -59,24 +57,20 @@ impl VulkanApp {
             },
         );
 
-        let device = instance.create_device(&DeviceDescription {
-            use_compute_queue: true,
-            use_transfer_queue: true,
-            ..Default::default()
-        });
+        let device = instance.create_device(&DeviceDescription::default());
 
         let swapchain = device.create_swapchain(
             &window,
             &SwapchainDescription {
-                image_count: 8,
+                image_count: 5,
+                frames_in_flight: FRAME_IN_FLIGHT,
                 width: size.width,
                 height: size.height,
             },
         );
 
-        let pipeline_manager = device.create_pipeline_manager();
         let raster_pipeline =
-            pipeline_manager.create_rasterization_pipeline(&RasterizationPipelineDescription {
+            device.create_rasterization_pipeline(&RasterizationPipelineDescription {
                 geometry: GeometryStage::Classic {
                     vertex_input: MyVertex::vertex_input_description(),
                     topology: InputTopology::TriangleList,
@@ -168,7 +162,7 @@ impl VulkanApp {
         recorder.copy_buffer(&BufferCopyInfo {
             src_buffer: staging_buffer,
             dst_buffer: vertex_buffer,
-            regions: vec![CopyRegion {
+            regions: &[CopyRegion {
                 size: 96,
                 src_offset: 0,
                 dst_offset: 0,
@@ -219,12 +213,6 @@ impl VulkanApp {
         });
         let color_data = [0.1, 0.8, 0.1];
         device.write_data_to_buffer(color_buffer, &color_data);
-        device.write_buffer(&BufferWriteInfo {
-            buffer: color_buffer,
-            offset: 0,
-            range: 12,
-            index: 0,
-        });
 
         device.write_sampler(&SamplerWriteInfo {
             sampler: texture_sampler,
@@ -233,24 +221,14 @@ impl VulkanApp {
 
         return VulkanApp {
             frame_data: [
-                FrameData {
-                    command_recorder: device.create_command_recorder(QueueType::Graphics),
-                    fence: device.create_fence(true),
-                },
-                FrameData {
-                    command_recorder: device.create_command_recorder(QueueType::Graphics),
-                    fence: device.create_fence(true),
-                },
-                FrameData {
-                    command_recorder: device.create_command_recorder(QueueType::Graphics),
-                    fence: device.create_fence(true),
-                },
+                device.create_command_recorder(QueueType::Graphics),
+                device.create_command_recorder(QueueType::Graphics),
+                device.create_command_recorder(QueueType::Graphics),
             ],
             window: window,
             instance: instance,
             device: device,
             swapchain: swapchain,
-            pipeline_manager: pipeline_manager,
             raster_pipeline: raster_pipeline,
             vertex_buffer: vertex_buffer,
             color_buffer: color_buffer,
@@ -265,9 +243,8 @@ impl VulkanApp {
         self.swapchain.recreate_swapchain(width, height);
     }
 
-    unsafe fn render(&mut self) {
+    fn render(&mut self) {
         let size = self.window.inner_size();
-        static mut curr_frame: usize = 0;
 
         if size.width == 0 || size.height == 0 {
             return;
@@ -275,7 +252,7 @@ impl VulkanApp {
 
         let color = {
             // simple hue-based color cycling
-            let r = (self.time * 0.5).sin() * 0.5 + 0.5;
+            let r = (self.time * 10.0).sin() * 0.5 + 0.5;
             let g = (self.time * 0.7 + std::f32::consts::PI / 2.0).sin() * 0.5 + 0.5;
             let b = (self.time * 1.3 + std::f32::consts::PI).sin() * 0.5 + 0.5;
             [r, g, b]
@@ -284,101 +261,85 @@ impl VulkanApp {
         self.device
             .write_data_to_buffer(self.color_buffer, &[color]);
 
-        self.device.wait_fence(self.frame_data[curr_frame].fence);
-        self.device.reset_fence(self.frame_data[curr_frame].fence);
+        let acquired_image = self.swapchain.acquire_image();
+        let curr_frame = acquired_image.curr_frame;
 
-        let (img, img_view, image_semaphore, present_semaphore) = self.swapchain.acquire_image();
+        self.frame_data[curr_frame].reset();
 
-        self.frame_data[curr_frame].command_recorder.reset();
+        self.frame_data[curr_frame].begin_recording(CommandBufferUsage::OneTimeSubmit);
 
-        self.frame_data[curr_frame]
-            .command_recorder
-            .begin_recording(CommandBufferUsage::OneTimeSubmit);
+        self.frame_data[curr_frame].pipeline_barrier(&[Barrier::Image(ImageBarrier {
+            image: acquired_image.image,
+            old_layout: ImageLayout::Undefined,
+            new_layout: ImageLayout::ColorAttachment,
+            src_stage: PipelineStage::TopOfPipe,
+            dst_stage: PipelineStage::ColorAttachmentOutput,
+            src_access: AccessType::None,
+            dst_access: AccessType::ColorAttachmentWrite,
+            ..Default::default()
+        })]);
 
-        self.frame_data[curr_frame]
-            .command_recorder
-            .pipeline_barrier(&[Barrier::Image(ImageBarrier {
-                image: img,
-                old_layout: ImageLayout::Undefined,
-                new_layout: ImageLayout::ColorAttachment,
-                src_stage: PipelineStage::TopOfPipe,
-                dst_stage: PipelineStage::ColorAttachmentOutput,
-                src_access: AccessType::None,
-                dst_access: AccessType::ColorAttachmentWrite,
-                ..Default::default()
-            })]);
-
-        self.frame_data[curr_frame]
-            .command_recorder
-            .begin_rendering(&RenderingBeginInfo {
-                render_area: RenderArea {
-                    offset: Offset2D { x: 0, y: 0 },
-                    extent: Extent2D {
-                        width: size.width,
-                        height: size.height,
-                    },
+        self.frame_data[curr_frame].begin_rendering(&RenderingBeginInfo {
+            render_area: RenderArea {
+                offset: Offset2D { x: 0, y: 0 },
+                extent: Extent2D {
+                    width: size.width,
+                    height: size.height,
                 },
-                rendering_flags: RenderingFlags::None,
-                view_mask: 0,
-                layer_count: 1,
-                color_attachments: &[RenderingAttachment {
-                    image_view: img_view,
-                    image_layout: ImageLayout::ColorAttachment,
-                    clear_value: ClearValue::ColorFloat([0.2, 0.2, 0.4, 1.0]),
-                    ..Default::default()
-                }],
-                depth_attachment: None,
-                stencil_attachment: None,
-            });
-
-        self.frame_data[curr_frame]
-            .command_recorder
-            .bind_pipeline(&self.raster_pipeline);
-        self.frame_data[curr_frame]
-            .command_recorder
-            .set_viewport_and_scissor(size.width, size.height);
-        self.frame_data[curr_frame]
-            .command_recorder
-            .bind_vertex_buffer(self.vertex_buffer, 0);
-        self.frame_data[curr_frame]
-            .command_recorder
-            .draw(6, 1, 0, 0);
-
-        self.frame_data[curr_frame].command_recorder.end_rendering();
-        self.frame_data[curr_frame]
-            .command_recorder
-            .pipeline_barrier(&[Barrier::Image(ImageBarrier {
-                image: img,
-                old_layout: ImageLayout::ColorAttachment,
-                new_layout: ImageLayout::PresentSrc,
-                src_stage: PipelineStage::ColorAttachmentOutput,
-                dst_stage: PipelineStage::BottomOfPipe,
-                src_access: AccessType::ColorAttachmentWrite,
-                dst_access: AccessType::None,
+            },
+            rendering_flags: RenderingFlags::None,
+            view_mask: 0,
+            layer_count: 1,
+            color_attachments: &[RenderingAttachment {
+                image_view: acquired_image.view,
+                image_layout: ImageLayout::ColorAttachment,
+                clear_value: ClearValue::ColorFloat([0.2, 0.2, 0.4, 1.0]),
                 ..Default::default()
-            })]);
-        let exec_buffer = self.frame_data[curr_frame].command_recorder.end_recording();
+            }],
+            depth_attachment: None,
+            stencil_attachment: None,
+        });
+
+        self.frame_data[curr_frame].set_push_constants(
+            &PushConstants {
+                color: self.device.get_buffer_address(self.color_buffer),
+            },
+            self.raster_pipeline,
+        );
+        self.frame_data[curr_frame].bind_pipeline(self.raster_pipeline);
+        self.frame_data[curr_frame].set_viewport_and_scissor(size.width, size.height);
+        self.frame_data[curr_frame].bind_vertex_buffer(self.vertex_buffer, 0);
+        self.frame_data[curr_frame].draw(6, 1, 0, 0);
+
+        self.frame_data[curr_frame].end_rendering();
+        self.frame_data[curr_frame].pipeline_barrier(&[Barrier::Image(ImageBarrier {
+            image: acquired_image.image,
+            old_layout: ImageLayout::ColorAttachment,
+            new_layout: ImageLayout::PresentSrc,
+            src_stage: PipelineStage::ColorAttachmentOutput,
+            dst_stage: PipelineStage::BottomOfPipe,
+            src_access: AccessType::ColorAttachmentWrite,
+            dst_access: AccessType::None,
+            ..Default::default()
+        })]);
+        let exec_buffer = self.frame_data[curr_frame].end_recording();
 
         self.device.submit(&QueueSubmitInfo {
-            fence: Some(self.frame_data[curr_frame].fence),
+            fence: Some(acquired_image.fence),
             command_buffers: &[exec_buffer],
             wait_semaphores: &[SemaphoreInfo {
-                semaphore: image_semaphore,
+                semaphore: acquired_image.image_semaphore,
                 pipeline_stage: PipelineStage::ColorAttachmentOutput,
                 value: None,
             }],
             signal_semaphores: &[SemaphoreInfo {
-                semaphore: present_semaphore,
+                semaphore: acquired_image.present_semaphore,
                 pipeline_stage: PipelineStage::BottomOfPipe,
                 value: None,
             }],
         });
 
         self.swapchain.present();
-
-        unsafe {
-            curr_frame = (curr_frame + 1) % FRAME_IN_FLIGHT;
-        }
     }
 }
 
@@ -390,10 +351,6 @@ impl Drop for VulkanApp {
 
         self.device.destory_texture(self.texture);
         self.device.destroy_sampler(self.texture_sampler);
-
-        for i in 0..FRAME_IN_FLIGHT {
-            self.device.destroy_fence(self.frame_data[i].fence);
-        }
     }
 }
 
@@ -411,13 +368,12 @@ impl ApplicationHandler for VulkanApp {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => self.resize(size.width, size.height),
             WindowEvent::RedrawRequested => {
-                unsafe {
-                    let start = Instant::now();
-                    self.render();
-                    let duration = start.elapsed();
-                    self.time += duration.as_secs_f32()
-                    //println!("{}", duration.as_millis());
-                }
+                let start = Instant::now();
+                self.render();
+                let duration = start.elapsed();
+                self.time += duration.as_secs_f32();
+                //println!("{}", duration.as_millis());
+
                 self.window.request_redraw();
             }
             _ => {}

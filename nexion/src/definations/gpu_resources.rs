@@ -48,39 +48,25 @@ pub struct BufferUsage {
 
 impl BufferUsage {
     /// Specifies that the buffer is used as a **storage buffer** in shaders.
-    pub const STORAGE: Self = Self {
-        flags: vk::BufferUsageFlags::STORAGE_BUFFER,
-    };
+    pub const STORAGE: Self = Self { flags: vk::BufferUsageFlags::STORAGE_BUFFER };
 
     /// Specifies that the buffer is used as a **vertex buffer** for drawing commands.
-    pub const VERTEX: Self = Self {
-        flags: vk::BufferUsageFlags::VERTEX_BUFFER,
-    };
+    pub const VERTEX: Self = Self { flags: vk::BufferUsageFlags::VERTEX_BUFFER };
 
     /// Specifies that the buffer is used as an **index buffer** for indexed drawing commands.
-    pub const INDEX: Self = Self {
-        flags: vk::BufferUsageFlags::INDEX_BUFFER,
-    };
+    pub const INDEX: Self = Self { flags: vk::BufferUsageFlags::INDEX_BUFFER };
 
     /// Specifies that the buffer is used as a **uniform buffer** in shaders.
-    pub const UNIFORM: Self = Self {
-        flags: vk::BufferUsageFlags::UNIFORM_BUFFER,
-    };
+    pub const UNIFORM: Self = Self { flags: vk::BufferUsageFlags::UNIFORM_BUFFER };
 
     /// Specifies that the buffer contains **indirect dispatch or drawing parameters**.
-    pub const INDIRECT: Self = Self {
-        flags: vk::BufferUsageFlags::INDIRECT_BUFFER,
-    };
+    pub const INDIRECT: Self = Self { flags: vk::BufferUsageFlags::INDIRECT_BUFFER };
 
     /// Specifies that the buffer can be used as the **source** in a transfer operation
-    pub const TRANSFER_SRC: Self = Self {
-        flags: vk::BufferUsageFlags::TRANSFER_SRC,
-    };
+    pub const TRANSFER_SRC: Self = Self { flags: vk::BufferUsageFlags::TRANSFER_SRC };
 
     /// Specifies that the buffer can be used as the **destination** in a transfer operation
-    pub const TRANSFER_DST: Self = Self {
-        flags: vk::BufferUsageFlags::TRANSFER_DST,
-    };
+    pub const TRANSFER_DST: Self = Self { flags: vk::BufferUsageFlags::TRANSFER_DST };
 
     // --- Implementation Methods ---
 
@@ -154,17 +140,11 @@ pub struct ImageUsage {
 }
 
 impl ImageUsage {
-    pub const TRANSFER_SRC: Self = Self {
-        flags: vk::ImageUsageFlags::TRANSFER_SRC,
-    };
-    pub const TRANSFER_DST: Self = Self {
-        flags: vk::ImageUsageFlags::TRANSFER_DST,
-    };
+    pub const TRANSFER_SRC: Self = Self { flags: vk::ImageUsageFlags::TRANSFER_SRC };
+    pub const TRANSFER_DST: Self = Self { flags: vk::ImageUsageFlags::TRANSFER_DST };
     pub const SAMPLED: Self = Self { flags: vk::ImageUsageFlags::SAMPLED };
     pub const STORAGE: Self = Self { flags: vk::ImageUsageFlags::STORAGE };
-    pub const COLOR_ATTACHMENT: Self = Self {
-        flags: vk::ImageUsageFlags::COLOR_ATTACHMENT,
-    };
+    pub const COLOR_ATTACHMENT: Self = Self { flags: vk::ImageUsageFlags::COLOR_ATTACHMENT };
     pub const DEPTH_STENCIL_ATTACHMENT: Self = Self {
         flags: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
     };
@@ -173,13 +153,21 @@ impl ImageUsage {
     pub(crate) fn to_vk_flag(&self) -> vk::ImageUsageFlags {
         self.flags
     }
+
+    pub const fn const_or(self, other: Self) -> ImageUsage {
+        Self {
+            flags: vk::ImageUsageFlags::from_raw(self.flags.as_raw() | other.flags.as_raw()),
+        }
+    }
 }
 
 impl BitOr for ImageUsage {
     type Output = Self;
 
     fn bitor(self, other: Self) -> Self::Output {
-        Self { flags: self.flags | other.flags }
+        Self {
+            flags: vk::ImageUsageFlags::from_raw(self.flags.as_raw() | other.flags.as_raw()),
+        }
     }
 }
 
@@ -292,7 +280,7 @@ impl SampleCount {
         };
     }
 }
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ImageLayout {
     Undefined,
     General,
@@ -348,13 +336,47 @@ impl Default for ImageDescription {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct ImageSubresourceLayers {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ImageSubresources {
     pub aspect: ImageAspect,
     pub mip_level: u32,
+    // this only matters for Subresource range
     pub level_count: u32,
     pub base_array_layer: u32,
     pub layer_count: u32,
+}
+
+impl ImageSubresources {
+    pub(crate) const fn to_vk_subresource_layers(&self) -> vk::ImageSubresourceLayers {
+        return vk::ImageSubresourceLayers {
+            aspect_mask: self.aspect.to_vk_aspect(),
+            mip_level: self.mip_level,
+            base_array_layer: self.base_array_layer,
+            layer_count: self.layer_count,
+        };
+    }
+
+    pub(crate) const fn to_vk_subresource_range(&self) -> vk::ImageSubresourceRange {
+        return vk::ImageSubresourceRange {
+            aspect_mask: self.aspect.to_vk_aspect(),
+            base_mip_level: self.mip_level,
+            level_count: self.level_count,
+            base_array_layer: self.base_array_layer,
+            layer_count: self.layer_count,
+        };
+    }
+}
+
+impl Default for ImageSubresources {
+    fn default() -> Self {
+        return ImageSubresources {
+            aspect: ImageAspect::Color,
+            mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
+        };
+    }
 }
 
 //// Image View Description ////
@@ -383,7 +405,7 @@ impl ImageViewType {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ImageAspect {
     Color,
     Depth,
@@ -392,40 +414,32 @@ pub enum ImageAspect {
 }
 
 impl ImageAspect {
-    pub(crate) fn to_vk_aspect(&self) -> vk::ImageAspectFlags {
+    pub(crate) const fn to_vk_aspect(&self) -> vk::ImageAspectFlags {
         match self {
             Self::Color => vk::ImageAspectFlags::COLOR,
             Self::Depth => vk::ImageAspectFlags::DEPTH,
             Self::Stencil => vk::ImageAspectFlags::STENCIL,
-            Self::DepthStencil => vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL,
+            Self::DepthStencil => vk::ImageAspectFlags::from_raw(vk::ImageAspectFlags::DEPTH.as_raw() | vk::ImageAspectFlags::STENCIL.as_raw()),
         }
     }
 }
 
 pub struct ImageViewDescription {
     pub view_type: ImageViewType,
-    pub aspect: ImageAspect,
-    pub base_mip_level: u32,
-    pub level_count: u32,
-    pub base_array_layer: u32,
-    pub layer_count: u32,
+    pub subresources: ImageSubresources,
 }
 
 impl Default for ImageViewDescription {
     fn default() -> Self {
         return Self {
             view_type: ImageViewType::Type2D,
-            aspect: ImageAspect::Color,
-            base_mip_level: 0,
-            level_count: 1,
-            base_array_layer: 0,
-            layer_count: 1,
+            subresources: ImageSubresources::default(),
         };
     }
 }
 
 //// SAMPLER DESCRIPTION ////
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Filter {
     Nearest,
     Linear,

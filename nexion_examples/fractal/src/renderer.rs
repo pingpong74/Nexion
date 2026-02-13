@@ -4,15 +4,10 @@ use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::camera::Camera;
 
-const FRAMES_IN_FLIGHT: usize = 3;
-
-struct FrameData {
-    command_recorder: CommandRecorder,
-    fence: Fence,
-}
+const FRAMES_IN_FLIGHT: usize = 2;
 
 #[repr(C)]
-#[derive(bytemuck::Pod, bytemuck::Zeroable, Copy, Clone)]
+#[derive(Copy, Clone)]
 struct MyPushConstants {
     view_proj_mat: [[f32; 4]; 4],
     pos: [f32; 3],
@@ -23,9 +18,8 @@ struct MyPushConstants {
 
 pub struct Renderer {
     vk_context: VulkanContext,
-    pipeline: RasterizationPipeline,
-    curr_frame: usize,
-    frame_data: [FrameData; FRAMES_IN_FLIGHT],
+    raster_pipeline: Pipeline,
+    frame_data: [CommandRecorder; FRAMES_IN_FLIGHT],
 }
 
 impl Renderer {
@@ -44,7 +38,8 @@ impl Renderer {
                 ..Default::default()
             },
             &SwapchainDescription {
-                image_count: 3,
+                image_count: 5,
+                frames_in_flight: FRAMES_IN_FLIGHT,
                 width: size.width,
                 height: size.height,
             },
@@ -73,15 +68,12 @@ impl Renderer {
                 ..Default::default()
             });
 
-        let frame_data = std::array::from_fn(|_| FrameData {
-            command_recorder: vk_context.create_command_recorder(QueueType::Graphics),
-            fence: vk_context.create_fence(true),
-        });
+        let frame_data =
+            std::array::from_fn(|_| vk_context.create_command_recorder(QueueType::Graphics));
 
         return Renderer {
             vk_context: vk_context,
-            pipeline: pipeline,
-            curr_frame: 0,
+            raster_pipeline: pipeline,
             frame_data: frame_data,
         };
     }
@@ -99,105 +91,79 @@ impl Renderer {
             time: time,
         };
 
-        self.vk_context
-            .wait_fence(self.frame_data[self.curr_frame].fence);
-        self.vk_context
-            .reset_fence(self.frame_data[self.curr_frame].fence);
+        let acquired_image = self.vk_context.acquire_image();
+        let curr_frame = acquired_image.curr_frame;
 
-        let (img, img_view, image_semaphore, present_semaphore) = self.vk_context.acquire_image();
+        self.frame_data[curr_frame].reset();
 
-        self.frame_data[self.curr_frame].command_recorder.reset();
+        self.frame_data[curr_frame].begin_recording(CommandBufferUsage::OneTimeSubmit);
 
-        self.frame_data[self.curr_frame]
-            .command_recorder
-            .begin_recording(CommandBufferUsage::OneTimeSubmit);
+        self.frame_data[curr_frame].set_push_constants(&push_constants, self.raster_pipeline);
 
-        self.frame_data[self.curr_frame]
-            .command_recorder
-            .set_push_constants(&push_constants, &self.pipeline);
+        self.frame_data[curr_frame].pipeline_barrier(&[Barrier::Image(ImageBarrier {
+            image: acquired_image.image,
+            old_layout: ImageLayout::Undefined,
+            new_layout: ImageLayout::ColorAttachment,
+            src_stage: PipelineStage::TopOfPipe,
+            dst_stage: PipelineStage::ColorAttachmentOutput,
+            src_access: AccessType::None,
+            dst_access: AccessType::ColorAttachmentWrite,
+            ..Default::default()
+        })]);
 
-        self.frame_data[self.curr_frame]
-            .command_recorder
-            .pipeline_barrier(&[Barrier::Image(ImageBarrier {
-                image: img,
-                old_layout: ImageLayout::Undefined,
-                new_layout: ImageLayout::ColorAttachment,
-                src_stage: PipelineStage::TopOfPipe,
-                dst_stage: PipelineStage::ColorAttachmentOutput,
-                src_access: AccessType::None,
-                dst_access: AccessType::ColorAttachmentWrite,
-                ..Default::default()
-            })]);
-
-        self.frame_data[self.curr_frame]
-            .command_recorder
-            .begin_rendering(&RenderingBeginInfo {
-                render_area: RenderArea {
-                    extent: Extent2D {
-                        width: size.width,
-                        height: size.height,
-                    },
-                    offset: Offset2D { x: 0, y: 0 },
+        self.frame_data[curr_frame].begin_rendering(&RenderingBeginInfo {
+            render_area: RenderArea {
+                extent: Extent2D {
+                    width: size.width,
+                    height: size.height,
                 },
-                rendering_flags: RenderingFlags::None,
-                view_mask: 0,
-                layer_count: 1,
-                color_attachments: &[RenderingAttachment {
-                    image_view: img_view,
-                    image_layout: ImageLayout::ColorAttachment,
-                    clear_value: ClearValue::ColorFloat([0.2, 0.2, 0.4, 1.0]),
-                    ..Default::default()
-                }],
-                depth_attachment: None,
-                stencil_attachment: None,
-            });
-
-        self.frame_data[self.curr_frame]
-            .command_recorder
-            .bind_pipeline(&self.pipeline);
-        self.frame_data[self.curr_frame]
-            .command_recorder
-            .set_viewport_and_scissor(size.width, size.height);
-        self.frame_data[self.curr_frame]
-            .command_recorder
-            .draw(3, 1, 0, 0);
-
-        self.frame_data[self.curr_frame]
-            .command_recorder
-            .end_rendering();
-        self.frame_data[self.curr_frame]
-            .command_recorder
-            .pipeline_barrier(&[Barrier::Image(ImageBarrier {
-                image: img,
-                old_layout: ImageLayout::ColorAttachment,
-                new_layout: ImageLayout::PresentSrc,
-                src_stage: PipelineStage::ColorAttachmentOutput,
-                dst_stage: PipelineStage::BottomOfPipe,
-                src_access: AccessType::ColorAttachmentWrite,
-                dst_access: AccessType::None,
+                offset: Offset2D { x: 0, y: 0 },
+            },
+            rendering_flags: RenderingFlags::None,
+            view_mask: 0,
+            layer_count: 1,
+            color_attachments: &[RenderingAttachment {
+                image_view: acquired_image.view,
+                image_layout: ImageLayout::ColorAttachment,
+                clear_value: ClearValue::ColorFloat([0.2, 0.2, 0.4, 1.0]),
                 ..Default::default()
-            })]);
-        let exec_buffer = self.frame_data[self.curr_frame]
-            .command_recorder
-            .end_recording();
+            }],
+            depth_attachment: None,
+            stencil_attachment: None,
+        });
+
+        self.frame_data[curr_frame].bind_pipeline(self.raster_pipeline);
+        self.frame_data[curr_frame].set_viewport_and_scissor(size.width, size.height);
+        self.frame_data[curr_frame].draw(3, 1, 0, 0);
+
+        self.frame_data[curr_frame].end_rendering();
+        self.frame_data[curr_frame].pipeline_barrier(&[Barrier::Image(ImageBarrier {
+            image: acquired_image.image,
+            old_layout: ImageLayout::ColorAttachment,
+            new_layout: ImageLayout::PresentSrc,
+            src_stage: PipelineStage::ColorAttachmentOutput,
+            dst_stage: PipelineStage::BottomOfPipe,
+            src_access: AccessType::ColorAttachmentWrite,
+            dst_access: AccessType::None,
+            ..Default::default()
+        })]);
+        let exec_buffer = self.frame_data[curr_frame].end_recording();
 
         self.vk_context.submit(&QueueSubmitInfo {
-            fence: Some(self.frame_data[self.curr_frame].fence),
+            fence: Some(acquired_image.fence),
             command_buffers: &[exec_buffer],
             wait_semaphores: &[SemaphoreInfo {
-                semaphore: image_semaphore,
+                semaphore: acquired_image.image_semaphore,
                 pipeline_stage: PipelineStage::ColorAttachmentOutput,
                 value: None,
             }],
             signal_semaphores: &[SemaphoreInfo {
-                semaphore: present_semaphore,
+                semaphore: acquired_image.present_semaphore,
                 pipeline_stage: PipelineStage::BottomOfPipe,
                 value: None,
             }],
         });
 
         self.vk_context.present();
-
-        self.curr_frame = (self.curr_frame + 1) % FRAMES_IN_FLIGHT;
     }
 }

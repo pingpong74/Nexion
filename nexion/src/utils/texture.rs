@@ -1,7 +1,7 @@
 use crate::*;
 
 pub struct TextureWriteInfo {
-    pub stg_buffer: BufferID,
+    pub stg_buffer: BufferId,
     pub buffer_offset: u64,
     pub width: u32,
     pub height: u32,
@@ -13,8 +13,8 @@ pub struct TextureDescription {}
 
 #[derive(Clone, Copy)]
 pub struct Texture {
-    pub image: ImageID,
-    pub image_view: ImageViewID,
+    pub image: ImageId,
+    pub image_view: ImageViewId,
 }
 
 impl Texture {
@@ -37,7 +37,7 @@ impl Texture {
                 buffer_offset: texture_write_info.buffer_offset,
                 buffer_row_length: 0,
                 buffer_image_height: 0,
-                image_subresource: ImageSubresourceLayers {
+                image_subresource: ImageSubresources {
                     aspect: ImageAspect::Color,
                     mip_level: 0,
                     level_count: 1,
@@ -45,11 +45,7 @@ impl Texture {
                     layer_count: 1,
                 },
                 image_offset: Offset3D { x: 0, y: 0, z: 0 },
-                image_extent: Extent3D {
-                    width: texture_write_info.width,
-                    height: texture_write_info.height,
-                    depth: 1,
-                },
+                image_extent: Extent3D { width: texture_write_info.width, height: texture_write_info.height, depth: 1 },
             },
         });
         recorder.pipeline_barrier(&[Barrier::Image(ImageBarrier {

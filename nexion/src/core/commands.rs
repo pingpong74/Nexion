@@ -1,12 +1,10 @@
-use std::sync::Arc;
-
-use ahash::HashMap;
 use ash::vk;
 use smallvec::SmallVec;
+use std::sync::Arc;
 
 use crate::{
-    Barrier, BlitInfo, BufferCopyInfo, BufferFillInfo, BufferID, BufferImageCopyInfo, CommandBufferUsage, DispatchIndirectInfo, DispatchInfo, DrawIndexedIndirectCountInfo, DrawIndexedIndirectInfo,
-    DrawIndirectCountInfo, DrawIndirectInfo, ImageCopyInfo, ImageID, ImageViewID, IndexType, Pipeline, QueueType, RenderingBeginInfo, backend::device::InnerDevice,
+    backend::{device::InnerDevice, pipelines::InnerPipelineManager},
+    *,
 };
 
 /// Not thread safe!!
@@ -18,19 +16,14 @@ pub struct CommandRecorder {
     pub(crate) exec_command_buffers: SmallVec<[vk::CommandBuffer; 2]>,
     pub(crate) current_commad_buffer: vk::CommandBuffer,
     pub(crate) queue_type: QueueType,
-    pub(crate) remembered_image_ids: HashMap<ImageID, vk::Image>,
-    pub(crate) remembered_buffer_ids: HashMap<BufferID, vk::Buffer>,
-    pub(crate) remembered_image_view_ids: HashMap<ImageViewID, vk::ImageView>,
     pub(crate) device: Arc<InnerDevice>,
+    pub(crate) pipeline_manager: Arc<InnerPipelineManager>,
 }
 
 impl CommandRecorder {
     pub fn reset(&mut self) {
         unsafe {
-            self.device
-                .handle
-                .reset_command_pool(self.handle, vk::CommandPoolResetFlags::empty())
-                .expect("Failed to reset command pool");
+            self.device.handle.reset_command_pool(self.handle, vk::CommandPoolResetFlags::empty()).expect("Failed to reset command pool");
         }
 
         self.commad_buffers.append(&mut self.exec_command_buffers);
@@ -184,30 +177,27 @@ impl CommandRecorder {
         }
     }
 
-    pub fn set_push_constants(&self, push_constants: &impl bytemuck::Pod, pipeline: &impl Pipeline) {
-        let data = bytemuck::bytes_of(push_constants);
+    pub fn set_push_constants<T>(&self, push_constants: &T, pipeline: Pipeline) {
+        let data_ptr = push_constants as *const T as *const u8;
+        let data_size = std::mem::size_of::<T>();
+
+        let slot = unsafe { &(*self.pipeline_manager.pipelines.get()) }.get_ref(pipeline.get_raw());
         unsafe {
             self.device
                 .handle
-                .cmd_push_constants(self.current_commad_buffer, pipeline.get_layout(), pipeline.get_push_const_shader_stage().to_vk(), 0, data);
+                .cmd_push_constants(self.current_commad_buffer, slot.layout, slot.push_constants_info.stage_flags.to_vk(), 0, std::slice::from_raw_parts(data_ptr, data_size));
         }
     }
 
-    pub fn bind_pipeline(&self, pipeline: &impl Pipeline) {
+    pub fn bind_pipeline(&self, pipeline: Pipeline) {
+        let slot = unsafe { &(*self.pipeline_manager.pipelines.get()) }.get_ref(pipeline.get_raw());
         unsafe {
-            self.device.handle.cmd_bind_descriptor_sets(
-                self.current_commad_buffer,
-                pipeline.get_bind_point(),
-                pipeline.get_layout(),
-                0,
-                &[self.device.bindless_descriptors.set],
-                &[],
-            );
-            self.device.handle.cmd_bind_pipeline(self.current_commad_buffer, pipeline.get_bind_point(), pipeline.get_handle());
+            self.device.handle.cmd_bind_descriptor_sets(self.current_commad_buffer, slot.bind_point, slot.layout, 0, &[self.device.bindless_descriptors.set], &[]);
+            self.device.handle.cmd_bind_pipeline(self.current_commad_buffer, slot.bind_point, slot.pipeline);
         }
     }
 
-    pub fn bind_vertex_buffer(&mut self, buffer_id: BufferID, offset: u64) {
+    pub fn bind_vertex_buffer(&mut self, buffer_id: BufferId, offset: u64) {
         let buffer = [self.check_and_remeber_buffer_id(buffer_id)];
         let offset = [offset];
 
@@ -216,7 +206,7 @@ impl CommandRecorder {
         }
     }
 
-    pub fn bind_index_buffer(&mut self, buffer_id: BufferID, offset: u64, index_type: IndexType) {
+    pub fn bind_index_buffer(&mut self, buffer_id: BufferId, offset: u64, index_type: IndexType) {
         let buffer = self.check_and_remeber_buffer_id(buffer_id);
 
         unsafe {
@@ -233,9 +223,7 @@ impl CommandRecorder {
 
     pub fn draw_indexed(&self, index_count: u32, instance_count: u32, first_index: u32, vertex_offset: i32, first_instance: u32) {
         unsafe {
-            self.device
-                .handle
-                .cmd_draw_indexed(self.current_commad_buffer, index_count, instance_count, first_index, vertex_offset, first_instance);
+            self.device.handle.cmd_draw_indexed(self.current_commad_buffer, index_count, instance_count, first_index, vertex_offset, first_instance);
         }
     }
 
@@ -307,14 +295,6 @@ impl CommandRecorder {
                 Barrier::Image(img_barrier) => {
                     let img = self.check_and_remeber_image_id(img_barrier.image);
 
-                    let subresource_range = vk::ImageSubresourceRange {
-                        aspect_mask: img_barrier.aspect.to_vk_aspect(),
-                        base_mip_level: img_barrier.base_mip,
-                        level_count: img_barrier.level_count,
-                        base_array_layer: img_barrier.base_layer,
-                        layer_count: img_barrier.layer_count,
-                    };
-
                     image_barriers.push(
                         vk::ImageMemoryBarrier2::default()
                             .src_stage_mask(img_barrier.src_stage.to_vk())
@@ -324,7 +304,7 @@ impl CommandRecorder {
                             .old_layout(img_barrier.old_layout.to_vk_layout())
                             .new_layout(img_barrier.new_layout.to_vk_layout())
                             .image(img)
-                            .subresource_range(subresource_range),
+                            .subresource_range(img_barrier.subresources.to_vk_subresource_range()),
                     );
                 }
                 Barrier::Buffer(buffer_barrier) => {
@@ -358,7 +338,7 @@ impl CommandRecorder {
         let src_buffer = self.check_and_remeber_buffer_id(buffer_copy_info.src_buffer);
         let dst_buffer = self.check_and_remeber_buffer_id(buffer_copy_info.dst_buffer);
 
-        let copy_regions: Vec<vk::BufferCopy2> = buffer_copy_info
+        let copy_regions: SmallVec<[vk::BufferCopy2; 4]> = buffer_copy_info
             .regions
             .iter()
             .map(|copy_info| vk::BufferCopy2::default().dst_offset(copy_info.dst_offset).src_offset(copy_info.src_offset).size(copy_info.size))
@@ -379,22 +359,27 @@ impl CommandRecorder {
         }
     }
 
+    pub fn update_buffer<T: Copy>(&mut self, info: &BufferUpdateInfo<T>) {
+        let buffer = self.check_and_remeber_buffer_id(info.buffer);
+
+        unsafe {
+            let ptr = info.data.as_ptr() as *const u8;
+            let len = info.data.len() * std::mem::size_of::<T>();
+            assert!(len <= 65536);
+            let data = std::slice::from_raw_parts(ptr, len);
+            self.device.handle.cmd_update_buffer(self.current_commad_buffer, buffer, info.offset, data);
+        }
+    }
+
     pub fn copy_buffer_to_image(&mut self, info: &BufferImageCopyInfo) {
         let src = self.check_and_remeber_buffer_id(info.buffer);
         let dst = self.check_and_remeber_image_id(info.image);
-
-        let subresource = vk::ImageSubresourceLayers {
-            aspect_mask: info.region.image_subresource.aspect.to_vk_aspect(),
-            mip_level: info.region.image_subresource.mip_level,
-            base_array_layer: info.region.image_subresource.base_array_layer,
-            layer_count: info.region.image_subresource.layer_count,
-        };
 
         let region = vk::BufferImageCopy2::default()
             .buffer_offset(info.region.buffer_offset)
             .buffer_row_length(info.region.buffer_row_length)
             .buffer_image_height(info.region.buffer_image_height)
-            .image_subresource(subresource)
+            .image_subresource(info.region.image_subresource.to_vk_subresource_layers())
             .image_offset(info.region.image_offset.to_vk())
             .image_extent(info.region.image_extent.to_vk());
 
@@ -414,18 +399,11 @@ impl CommandRecorder {
         let src = self.check_and_remeber_image_id(info.image);
         let dst = self.check_and_remeber_buffer_id(info.buffer);
 
-        let subresource = vk::ImageSubresourceLayers {
-            aspect_mask: info.region.image_subresource.aspect.to_vk_aspect(),
-            mip_level: info.region.image_subresource.mip_level,
-            base_array_layer: info.region.image_subresource.base_array_layer,
-            layer_count: info.region.image_subresource.layer_count,
-        };
-
         let region = vk::BufferImageCopy2::default()
             .buffer_offset(info.region.buffer_offset)
             .buffer_row_length(info.region.buffer_row_length)
             .buffer_image_height(info.region.buffer_image_height)
-            .image_subresource(subresource)
+            .image_subresource(info.region.image_subresource.to_vk_subresource_layers())
             .image_offset(info.region.image_offset.to_vk())
             .image_extent(info.region.image_extent.to_vk());
 
@@ -519,51 +497,38 @@ impl CommandRecorder {
 }
 
 impl CommandRecorder {
-    fn check_and_remeber_image_id(&mut self, id: ImageID) -> vk::Image {
-        return match self.remembered_image_ids.get(&id) {
-            Some(img) => *img,
-            None => {
-                let img_pool = self.device.image_pool.read().unwrap();
-                let img = img_pool.get_ref(id.id);
-                self.remembered_image_ids.insert(id, img.handle);
-                img.handle
-            }
-        };
+    fn check_and_remeber_image_id(&mut self, id: ImageId) -> vk::Image {
+        let img = unsafe { (&mut *self.device.image_pool.get()).get_ref(id.id) };
+
+        return img.handle;
     }
 
-    fn check_and_remeber_buffer_id(&mut self, id: BufferID) -> vk::Buffer {
-        return match self.remembered_buffer_ids.get(&id) {
-            Some(buff) => *buff,
-            None => {
-                let buffer_pool = self.device.buffer_pool.read().unwrap();
-                let buffer = buffer_pool.get_ref(id.id);
-                self.remembered_buffer_ids.insert(id, buffer.handle);
-                buffer.handle
-            }
-        };
+    fn check_and_remeber_buffer_id(&mut self, id: BufferId) -> vk::Buffer {
+        let buffer = unsafe { (&mut *self.device.buffer_pool.get()).get_ref(id.id) };
+
+        return buffer.handle;
     }
 
-    fn check_and_remeber_image_view_id(&mut self, id: ImageViewID) -> vk::ImageView {
-        return match self.remembered_image_view_ids.get(&id) {
-            Some(img_view) => *img_view,
-            None => {
-                let pool = self.device.image_view_pool.read().unwrap();
-                let img_view = pool.get_ref(id.id);
-                self.remembered_image_view_ids.insert(id, img_view.handle);
-                img_view.handle
-            }
-        };
+    fn check_and_remeber_image_view_id(&mut self, id: ImageViewId) -> vk::ImageView {
+        let img_view = unsafe { (&mut *self.device.image_view_pool.get()).get_ref(id.id) };
+        return img_view.handle;
     }
 
     pub(crate) fn new_cmd_buffer(&self) -> vk::CommandBuffer {
-        let alloc_info = vk::CommandBufferAllocateInfo::default()
-            .command_buffer_count(1)
-            .command_pool(self.handle)
-            .level(vk::CommandBufferLevel::PRIMARY);
+        let alloc_info = vk::CommandBufferAllocateInfo::default().command_buffer_count(1).command_pool(self.handle).level(vk::CommandBufferLevel::PRIMARY);
 
         let cmd_buffer = unsafe { self.device.handle.allocate_command_buffers(&alloc_info).expect("Failed to allocate command buffer") }[0];
 
         return cmd_buffer;
+    }
+
+    pub(crate) fn flush_descriptors(&mut self) {
+        let buffer = self.device.bindless_descriptors.device_address_buffer.as_ref().unwrap();
+        let address_data = self.device.bindless_descriptors.get_addresses();
+
+        unsafe {
+            self.device.handle.cmd_update_buffer(self.current_commad_buffer, buffer.handle, 0, address_data);
+        };
     }
 }
 

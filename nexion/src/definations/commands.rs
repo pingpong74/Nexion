@@ -3,9 +3,9 @@ use std::u64;
 
 use crate::*;
 
-use crate::{BufferID, ExecutableCommandBuffer, Fence, ImageID, ImageViewID, Semaphore};
+use crate::{BufferId, ExecutableCommandBuffer, Fence, ImageId, ImageViewId, Semaphore};
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum QueueType {
     Graphics,
     Transfer,
@@ -13,6 +13,7 @@ pub enum QueueType {
     None,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum CommandBufferUsage {
     OneTimeSubmit,
     RenderPassContinue,
@@ -29,6 +30,7 @@ impl CommandBufferUsage {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum IndexType {
     Uint32,
     Uint16,
@@ -44,12 +46,13 @@ impl IndexType {
 }
 
 // Render begin info
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderArea {
     pub offset: Offset2D,
     pub extent: Extent2D,
 }
-#[derive(Copy, Clone, PartialEq)]
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LoadOp {
     Load,
     Clear,
@@ -67,7 +70,7 @@ impl LoadOp {
     }
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StoreOp {
     Store,
     DontCare,
@@ -119,15 +122,9 @@ impl ClearValue {
     #[inline]
     pub(crate) const fn to_vk(&self) -> vk::ClearValue {
         match self {
-            Self::ColorFloat(v) => vk::ClearValue {
-                color: vk::ClearColorValue { float32: *v },
-            },
-            Self::ColorInt(v) => vk::ClearValue {
-                color: vk::ClearColorValue { int32: *v },
-            },
-            Self::ColorUint(v) => vk::ClearValue {
-                color: vk::ClearColorValue { uint32: *v },
-            },
+            Self::ColorFloat(v) => vk::ClearValue { color: vk::ClearColorValue { float32: *v } },
+            Self::ColorInt(v) => vk::ClearValue { color: vk::ClearColorValue { int32: *v } },
+            Self::ColorUint(v) => vk::ClearValue { color: vk::ClearColorValue { uint32: *v } },
             Self::DepthStencil { depth, stencil } => vk::ClearValue {
                 depth_stencil: vk::ClearDepthStencilValue { depth: *depth, stencil: *stencil },
             },
@@ -150,11 +147,12 @@ impl ClearValue {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderingAttachment {
-    pub image_view: ImageViewID,
+    pub image_view: ImageViewId,
     pub image_layout: ImageLayout,
     pub resolve_mode: ResolveMode,
-    pub resolve_image_view: Option<ImageViewID>,
+    pub resolve_image_view: Option<ImageViewId>,
     pub resolve_image_layout: ImageLayout,
     pub load_op: LoadOp,
     pub store_op: StoreOp,
@@ -164,7 +162,7 @@ pub struct RenderingAttachment {
 impl Default for RenderingAttachment {
     fn default() -> Self {
         Self {
-            image_view: ImageViewID { id: u64::max_value() },
+            image_view: ImageViewId { id: u64::max_value() },
             image_layout: ImageLayout::Undefined,
             resolve_image_view: None,
             resolve_image_layout: ImageLayout::Undefined,
@@ -176,7 +174,7 @@ impl Default for RenderingAttachment {
     }
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum RenderingFlags {
     None,
     ContentsSecondaryCommandBuffers,
@@ -226,7 +224,7 @@ impl<'a> Default for RenderingBeginInfo<'a> {
 // Indirect draw
 
 #[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Clone, Copy)]
 pub struct DrawIndirectCommand {
     pub vertex_count: u32,
     pub instance_count: u32,
@@ -234,132 +232,141 @@ pub struct DrawIndirectCommand {
     pub first_instance: u32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DrawIndirectInfo {
-    pub buffer: BufferID,
+    pub buffer: BufferId,
     pub offset: u64,
     pub draw_count: u32,
     pub stride: u32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DrawIndexedIndirectInfo {
-    pub buffer: BufferID,
+    pub buffer: BufferId,
     pub offset: u64,
     pub draw_count: u32,
     pub stride: u32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DrawIndirectCountInfo {
-    pub buffer: BufferID,
+    pub buffer: BufferId,
     pub offset: u64,
-    pub count_buffer: BufferID,
+    pub count_buffer: BufferId,
     pub count_offset: u64,
     pub max_draw_count: u32,
     pub stride: u32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DrawIndexedIndirectCountInfo {
-    pub buffer: BufferID,
+    pub buffer: BufferId,
     pub offset: u64,
-    pub count_buffer: BufferID,
+    pub count_buffer: BufferId,
     pub count_offset: u64,
     pub max_draw_count: u32,
     pub stride: u32,
 }
 
 // Compute
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DispatchInfo {
     pub group_count_x: u32,
     pub group_count_y: u32,
     pub group_count_z: u32,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DispatchIndirectInfo {
-    pub buffer: BufferID,
+    pub buffer: BufferId,
     pub offset: u64,
 }
 
 // Copy commands
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CopyRegion {
     pub src_offset: u64,
     pub dst_offset: u64,
     pub size: u64,
 }
 
-pub struct BufferCopyInfo {
-    pub src_buffer: BufferID,
-    pub dst_buffer: BufferID,
-    pub regions: Vec<CopyRegion>,
+#[derive(Debug, Clone, PartialEq)]
+pub struct BufferCopyInfo<'a> {
+    pub src_buffer: BufferId,
+    pub dst_buffer: BufferId,
+    pub regions: &'a [CopyRegion],
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BufferFillInfo {
-    pub buffer: BufferID,
+    pub buffer: BufferId,
     pub offset: u64,
     pub size: u64,
     pub data: u32,
 }
 
-#[derive(Clone, Copy)]
+pub struct BufferUpdateInfo<'a, T: Copy> {
+    pub buffer: BufferId,
+    pub offset: u64,
+    pub data: &'a [T],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BufferImageCopyInfo {
-    pub buffer: BufferID,
-    pub image: ImageID,
+    pub buffer: BufferId,
+    pub image: ImageId,
     pub dst_image_layout: ImageLayout,
     pub region: BufferImageCopyRegion,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BufferImageCopyRegion {
     pub buffer_offset: u64,
     pub buffer_row_length: u32,
     pub buffer_image_height: u32,
-    pub image_subresource: ImageSubresourceLayers,
+    pub image_subresource: ImageSubresources,
     pub image_offset: Offset3D,
     pub image_extent: Extent3D,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ImageCopyInfo {
-    pub src_image: ImageID,
+    pub src_image: ImageId,
     pub src_image_layout: ImageLayout,
-    pub dst_image: ImageID,
+    pub dst_image: ImageId,
     pub dst_image_layout: ImageLayout,
     pub region: ImageCopyRegion,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ImageCopyRegion {
-    pub src_subresource: ImageSubresourceLayers,
+    pub src_subresource: ImageSubresources,
     pub src_offset: Offset3D,
-    pub dst_subresource: ImageSubresourceLayers,
+    pub dst_subresource: ImageSubresources,
     pub dst_offset: Offset3D,
     pub extent: Extent3D,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BlitInfo<'a> {
-    pub src_image: ImageID,
+    pub src_image: ImageId,
     pub src_layout: ImageLayout,
-    pub dst_image: ImageID,
+    pub dst_image: ImageId,
     pub dst_layout: ImageLayout,
     pub regions: &'a [BlitRegion],
     pub filter: Filter,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BlitRegion {
-    pub src_subresource: ImageSubresourceLayers,
+    pub src_subresource: ImageSubresources,
     pub src_offsets: [Offset3D; 2],
-    pub dst_subresource: ImageSubresourceLayers,
+    pub dst_subresource: ImageSubresources,
     pub dst_offsets: [Offset3D; 2],
 }
 
 // Memory barriers
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PipelineStage {
     None,
     TopOfPipe,
@@ -425,7 +432,7 @@ impl PipelineStage {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AccessType {
     None,
     Indirect,
@@ -443,7 +450,7 @@ pub enum AccessType {
 }
 
 impl AccessType {
-    pub const fn to_vk(&self) -> vk::AccessFlags2 {
+    pub(crate) const fn to_vk(&self) -> vk::AccessFlags2 {
         match self {
             AccessType::None => vk::AccessFlags2::empty(),
             AccessType::Indirect => vk::AccessFlags2::INDIRECT_COMMAND_READ,
@@ -460,9 +467,23 @@ impl AccessType {
             AccessType::TransferWrite => vk::AccessFlags2::TRANSFER_WRITE,
         }
     }
+
+    pub(crate) fn is_write(&self) -> bool {
+        match self {
+            AccessType::ShaderWrite => true,
+            AccessType::ColorAttachmentWrite => true,
+            AccessType::DepthStencilWrite => true,
+            AccessType::TransferWrite => true,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn is_read(&self) -> bool {
+        !self.is_write()
+    }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MemoryBarrier {
     pub src_stage: PipelineStage,
     pub dst_stage: PipelineStage,
@@ -481,10 +502,9 @@ impl Default for MemoryBarrier {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ImageBarrier {
-    pub image: ImageID,
-    pub aspect: ImageAspect,
+    pub image: ImageId,
     pub old_layout: ImageLayout,
     pub new_layout: ImageLayout,
     pub src_stage: PipelineStage,
@@ -493,17 +513,13 @@ pub struct ImageBarrier {
     pub dst_access: AccessType,
     pub src_queue: QueueType,
     pub dst_queue: QueueType,
-    pub base_mip: u32,
-    pub level_count: u32,
-    pub base_layer: u32,
-    pub layer_count: u32,
+    pub subresources: ImageSubresources,
 }
 
 impl Default for ImageBarrier {
     fn default() -> Self {
         return ImageBarrier {
-            image: ImageID { id: u64::MAX },
-            aspect: ImageAspect::Color,
+            image: ImageId::null(),
             old_layout: ImageLayout::Undefined,
             new_layout: ImageLayout::Undefined,
             src_stage: PipelineStage::TopOfPipe,
@@ -512,17 +528,14 @@ impl Default for ImageBarrier {
             dst_access: AccessType::ColorAttachmentRead,
             src_queue: QueueType::None,
             dst_queue: QueueType::None,
-            base_mip: 0,
-            level_count: 1,
-            base_layer: 0,
-            layer_count: 1,
+            subresources: ImageSubresources::default(),
         };
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BufferBarrier {
-    pub buffer: BufferID,
+    pub buffer: BufferId,
     pub src_stage: PipelineStage,
     pub dst_stage: PipelineStage,
     pub src_access: AccessType,
@@ -536,7 +549,7 @@ pub struct BufferBarrier {
 impl Default for BufferBarrier {
     fn default() -> Self {
         return BufferBarrier {
-            buffer: BufferID { id: u64::MAX },
+            buffer: BufferId { id: u64::MAX },
             src_stage: PipelineStage::TopOfPipe,
             dst_stage: PipelineStage::BottomOfPipe,
             src_access: AccessType::ColorAttachmentRead,
@@ -549,7 +562,7 @@ impl Default for BufferBarrier {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Barrier {
     Memory(MemoryBarrier),
     Image(ImageBarrier),

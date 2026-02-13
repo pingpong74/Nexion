@@ -5,10 +5,7 @@ use crate::{
 
 use ash::vk;
 use gpu_allocator::{vulkan::*, *};
-use std::{
-    cell::UnsafeCell,
-    sync::{Arc, RwLock},
-};
+use std::{cell::UnsafeCell, sync::Arc};
 
 pub(crate) struct QueueFamilyIndices {
     pub graphics_family: Option<u32>,
@@ -37,10 +34,10 @@ pub(crate) struct InnerDevice {
 
     //Pools for various gpu resources
     pub(crate) bindless_descriptors: GpuBindlessDescriptorPool,
-    pub(crate) buffer_pool: RwLock<GpuResourcePool<BufferSlot>>,
-    pub(crate) image_pool: RwLock<GpuResourcePool<ImageSlot>>,
-    pub(crate) image_view_pool: RwLock<GpuResourcePool<ImageViewSlot>>,
-    pub(crate) sampler_pool: RwLock<GpuResourcePool<SamplerSlot>>,
+    pub(crate) buffer_pool: UnsafeCell<ResourcePool<BufferSlot>>,
+    pub(crate) image_pool: UnsafeCell<ResourcePool<ImageSlot>>,
+    pub(crate) image_view_pool: UnsafeCell<ResourcePool<ImageViewSlot>>,
+    pub(crate) sampler_pool: UnsafeCell<ResourcePool<SamplerSlot>>,
 
     //Queues
     pub(crate) graphics_queue: vk::Queue,
@@ -96,10 +93,7 @@ impl InnerDevice {
 
         // Queue priorities (all same)
         let priorities = [1.0_f32];
-        let queue_infos: Vec<_> = unique_families
-            .iter()
-            .map(|&family| vk::DeviceQueueCreateInfo::default().queue_family_index(family).queue_priorities(&priorities))
-            .collect();
+        let queue_infos: Vec<_> = unique_families.iter().map(|&family| vk::DeviceQueueCreateInfo::default().queue_family_index(family).queue_priorities(&priorities)).collect();
 
         // Existing common features
         let features = vk::PhysicalDeviceFeatures::default().shader_int64(true).multi_draw_indirect(true).sampler_anisotropy(true);
@@ -122,7 +116,7 @@ impl InnerDevice {
         let mut sync2 = vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true);
         let mut timeline_sem = vk::PhysicalDeviceTimelineSemaphoreFeatures::default().timeline_semaphore(true);
         let mut buffer_device_address = vk::PhysicalDeviceBufferDeviceAddressFeatures::default().buffer_device_address(true);
-        let mut vk_features_11 = vk::PhysicalDeviceVulkan11Features::default().shader_draw_parameters(true);
+        let mut vk_features_11 = vk::PhysicalDeviceVulkan11Features::default().shader_draw_parameters(true).variable_pointers(true).variable_pointers_storage_buffer(true);
 
         // Ray tracing
         let mut accel_struct_features = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default();
@@ -160,14 +154,11 @@ impl InnerDevice {
             features2 = features2.push_next(&mut float_atomic_features);
         }
 
-        let create_info = vk::DeviceCreateInfo::default()
-            .queue_create_infos(&queue_infos)
-            .enabled_extension_names(&device_extensions)
-            .push_next(&mut features2);
+        let create_info = vk::DeviceCreateInfo::default().queue_create_infos(&queue_infos).enabled_extension_names(&device_extensions).push_next(&mut features2);
 
         let dev = unsafe { instance.handle.create_device(physical_device.handle, &create_info, None).expect("Failed to create logical device") };
 
-        let allocator = Allocator::new(&AllocatorCreateDesc {
+        let mut allocator = Allocator::new(&AllocatorCreateDesc {
             instance: instance.handle.clone(),
             device: dev.clone(),
             physical_device: physical_device.handle,
@@ -177,11 +168,49 @@ impl InnerDevice {
         })
         .expect("Failed to create allocator");
 
-        let bindless_desc = GpuBindlessDescriptorPool::new(&dev, 100, 100, 100, 100);
-
         let graphics_queue = unsafe { dev.get_device_queue(physical_device.queue_families.graphics_family.unwrap(), 0) };
         let compute_queue = unsafe { dev.get_device_queue(physical_device.queue_families.compute_family.unwrap(), 0) };
         let transfer_queue = unsafe { dev.get_device_queue(physical_device.queue_families.transfer_family.unwrap(), 0) };
+
+        let device_address_buffer = {
+            let indices = [
+                physical_device.queue_families.compute_family.unwrap(),
+                physical_device.queue_families.graphics_family.unwrap(),
+                physical_device.queue_families.transfer_family.unwrap(),
+            ];
+
+            let buffer_create_info = vk::BufferCreateInfo::default()
+                .usage(vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS | vk::BufferUsageFlags::STORAGE_BUFFER)
+                .size(100 * 64)
+                .sharing_mode(vk::SharingMode::CONCURRENT)
+                .queue_family_indices(&indices);
+
+            let buffer = unsafe { dev.create_buffer(&buffer_create_info, None).expect("Failed to create buffer ") };
+            let memory_requirements = unsafe { dev.get_buffer_memory_requirements(buffer) };
+
+            let allocation_create_info = AllocationCreateDesc {
+                name: "o",
+                requirements: memory_requirements,
+                location: MemoryLocation::GpuOnly,
+                linear: true,
+                allocation_scheme: AllocationScheme::DedicatedBuffer(buffer),
+            };
+
+            let allocation = allocator.allocate(&allocation_create_info).expect("Failed to allocate memory on device");
+
+            unsafe {
+                dev.bind_buffer_memory(buffer, allocation.memory(), allocation.offset()).expect("Failed to bind buffer memory");
+            }
+            let buffer_address = unsafe { dev.get_buffer_device_address(&vk::BufferDeviceAddressInfo::default().buffer(buffer)) };
+
+            BufferSlot {
+                handle: buffer,
+                allocation: allocation,
+                address: buffer_address,
+            }
+        };
+
+        let bindless_desc = GpuBindlessDescriptorPool::new(&dev, device_address_buffer, 100, 100, 100);
 
         return InnerDevice {
             handle: dev,
@@ -191,10 +220,10 @@ impl InnerDevice {
 
             //Resource Pools
             bindless_descriptors: bindless_desc,
-            buffer_pool: RwLock::new(GpuResourcePool::new()),
-            image_pool: RwLock::new(GpuResourcePool::new()),
-            image_view_pool: RwLock::new(GpuResourcePool::new()),
-            sampler_pool: RwLock::new(GpuResourcePool::new()),
+            buffer_pool: UnsafeCell::new(ResourcePool::new()),
+            image_pool: UnsafeCell::new(ResourcePool::new()),
+            image_view_pool: UnsafeCell::new(ResourcePool::new()),
+            sampler_pool: UnsafeCell::new(ResourcePool::new()),
 
             //Queues
             graphics_queue: graphics_queue,
@@ -224,11 +253,7 @@ impl InnerDevice {
             }
 
             // Transfer (dedicated if possible)
-            if family.queue_flags.contains(ash::vk::QueueFlags::TRANSFER)
-                && !family.queue_flags.contains(ash::vk::QueueFlags::GRAPHICS)
-                && !family.queue_flags.contains(ash::vk::QueueFlags::COMPUTE)
-                && indices.transfer_family.is_none()
-            {
+            if family.queue_flags.contains(ash::vk::QueueFlags::TRANSFER) && !family.queue_flags.contains(ash::vk::QueueFlags::GRAPHICS) && !family.queue_flags.contains(ash::vk::QueueFlags::COMPUTE) && indices.transfer_family.is_none() {
                 indices.transfer_family = Some(i as u32);
             }
 
@@ -302,7 +327,7 @@ impl InnerDevice {
 
 // Buffer //
 impl InnerDevice {
-    pub(crate) fn create_buffer(&self, buffer_desc: &BufferDescription) -> BufferID {
+    pub(crate) fn create_buffer(&self, buffer_desc: &BufferDescription) -> BufferId {
         let indices = [
             self.physical_device.queue_families.compute_family.unwrap(),
             self.physical_device.queue_families.graphics_family.unwrap(),
@@ -333,17 +358,19 @@ impl InnerDevice {
         }
         let buffer_address = unsafe { self.handle.get_buffer_device_address(&vk::BufferDeviceAddressInfo::default().buffer(buffer)) };
 
-        let raw_id = self.buffer_pool.write().unwrap().add(BufferSlot {
-            handle: buffer,
-            address: buffer_address,
-            allocation: allocation,
-        });
+        let raw_id = unsafe {
+            (&mut *self.buffer_pool.get()).add(BufferSlot {
+                handle: buffer,
+                address: buffer_address,
+                allocation: allocation,
+            })
+        };
 
-        return BufferID { id: raw_id };
+        return BufferId { id: raw_id };
     }
 
-    pub(crate) fn destroy_buffer(&self, id: BufferID) {
-        let res = self.buffer_pool.write().unwrap().delete(id.id);
+    pub(crate) fn destroy_buffer(&self, id: BufferId) {
+        let res = unsafe { (&mut *self.buffer_pool.get()).delete(id.id) };
 
         unsafe {
             self.allocator.get().as_mut().unwrap().free(res.allocation).expect("Failed to deallocate buffer");
@@ -351,9 +378,8 @@ impl InnerDevice {
         }
     }
 
-    pub(crate) fn write_data_to_buffer<T: Copy>(&self, buffer_id: BufferID, data: &[T]) {
-        let buffer_pool = self.buffer_pool.read().unwrap();
-        let buffer = buffer_pool.get_ref(buffer_id.id);
+    pub(crate) fn write_data_to_buffer<T: Copy>(&self, buffer_id: BufferId, data: &[T]) {
+        let buffer = unsafe { (&mut *self.buffer_pool.get()).get_ref(buffer_id.id) };
 
         unsafe {
             let ptr = buffer.allocation.mapped_ptr().expect("Tried to write to an unmapped buffer").as_ptr() as *mut T;
@@ -361,16 +387,14 @@ impl InnerDevice {
         }
     }
 
-    pub(crate) fn get_raw_ptr(&self, buffer_id: BufferID) -> *mut u8 {
-        let buffer_pool = self.buffer_pool.read().unwrap();
-        let buffer = buffer_pool.get_ref(buffer_id.id);
+    pub(crate) fn get_raw_ptr(&self, buffer_id: BufferId) -> *mut u8 {
+        let buffer = unsafe { (&mut *self.buffer_pool.get()).get_ref(buffer_id.id) };
 
         return buffer.allocation.mapped_ptr().expect("Tried to write to an unmapped buffer").as_ptr() as *mut u8;
     }
 
-    pub(crate) fn get_device_address(&self, buffer_id: BufferID) -> vk::DeviceAddress {
-        let buffer_pool = self.buffer_pool.read().unwrap();
-        let buffer = buffer_pool.get_ref(buffer_id.id);
+    pub(crate) fn get_device_address(&self, buffer_id: BufferId) -> vk::DeviceAddress {
+        let buffer = unsafe { (&mut *self.buffer_pool.get()).get_ref(buffer_id.id) };
 
         return buffer.address;
     }
@@ -378,7 +402,7 @@ impl InnerDevice {
 
 // Image //
 impl InnerDevice {
-    pub(crate) fn create_image(&self, image_desc: &ImageDescription) -> ImageID {
+    pub(crate) fn create_image(&self, image_desc: &ImageDescription) -> ImageId {
         let image_create_info = vk::ImageCreateInfo::default()
             .usage(image_desc.usage.to_vk_flag())
             .extent(image_desc.extent.to_vk())
@@ -408,17 +432,19 @@ impl InnerDevice {
             self.handle.bind_image_memory(image, allocation.memory(), allocation.offset()).expect("Failed to bind image memory");
         }
 
-        let id = self.image_pool.write().unwrap().add(ImageSlot {
-            handle: image,
-            allocation: allocation,
-            format: image_desc.format.to_vk_format(),
-        });
+        let id = unsafe {
+            (&mut *self.image_pool.get()).add(ImageSlot {
+                handle: image,
+                allocation: allocation,
+                format: image_desc.format.to_vk_format(),
+            })
+        };
 
-        return ImageID { id: id };
+        return ImageId { id: id };
     }
 
-    pub(crate) fn destroy_image(&self, id: ImageID) {
-        let img = self.image_pool.write().unwrap().delete(id.id);
+    pub(crate) fn destroy_image(&self, id: ImageId) {
+        let img = unsafe { (&mut *self.image_pool.get()).delete(id.id) };
 
         unsafe {
             self.allocator.get().as_mut().unwrap().free(img.allocation).expect("Failed to deallocate image");
@@ -429,9 +455,8 @@ impl InnerDevice {
 
 // Image View //
 impl InnerDevice {
-    pub(crate) fn create_image_view(&self, image_id: ImageID, image_view_description: &ImageViewDescription) -> ImageViewID {
-        let pool = self.image_pool.read().unwrap();
-        let img = pool.get_ref(image_id.id);
+    pub(crate) fn create_image_view(&self, image_id: ImageId, image_view_description: &ImageViewDescription) -> ImageViewId {
+        let img = unsafe { (&mut *self.image_pool.get()).get_ref(image_id.id) };
 
         let image_view_create_info = vk::ImageViewCreateInfo::default()
             .image(img.handle)
@@ -443,24 +468,17 @@ impl InnerDevice {
                 b: vk::ComponentSwizzle::IDENTITY,
                 a: vk::ComponentSwizzle::IDENTITY,
             })
-            .subresource_range(
-                vk::ImageSubresourceRange::default()
-                    .aspect_mask(image_view_description.aspect.to_vk_aspect())
-                    .base_mip_level(image_view_description.base_mip_level)
-                    .level_count(image_view_description.layer_count)
-                    .base_array_layer(image_view_description.base_array_layer)
-                    .layer_count(image_view_description.layer_count),
-            );
+            .subresource_range(image_view_description.subresources.to_vk_subresource_range());
 
         let image_view = unsafe { self.handle.create_image_view(&image_view_create_info, None).expect("Failed to create Image view") };
 
-        let id = self.image_view_pool.write().unwrap().add(ImageViewSlot { handle: image_view });
+        let id = unsafe { (&mut *self.image_view_pool.get()).add(ImageViewSlot { handle: image_view }) };
 
-        return ImageViewID { id: id };
+        return ImageViewId { id: id };
     }
 
-    pub(crate) fn destroy_image_view(&self, image_view_id: ImageViewID) {
-        let img_view = self.image_view_pool.write().unwrap().delete(image_view_id.id);
+    pub(crate) fn destroy_image_view(&self, image_view_id: ImageViewId) {
+        let img_view = unsafe { (&mut *self.image_view_pool.get()).delete(image_view_id.id) };
 
         unsafe {
             self.handle.destroy_image_view(img_view.handle, None);
@@ -470,7 +488,7 @@ impl InnerDevice {
 
 // Sampler //
 impl InnerDevice {
-    pub(crate) fn create_sampler(&self, sampler_desc: &SamplerDescription) -> SamplerID {
+    pub(crate) fn create_sampler(&self, sampler_desc: &SamplerDescription) -> SamplerId {
         let create_info = vk::SamplerCreateInfo::default()
             .mag_filter(sampler_desc.mag_filter.to_vk())
             .min_filter(sampler_desc.min_filter.to_vk())
@@ -490,13 +508,13 @@ impl InnerDevice {
 
         let sampler = unsafe { self.handle.create_sampler(&create_info, None).expect("Failed to create sampler") };
 
-        let id = self.sampler_pool.write().unwrap().add(SamplerSlot { handle: sampler });
+        let id = unsafe { (&mut *self.sampler_pool.get()).add(SamplerSlot { handle: sampler }) };
 
-        return SamplerID { id: id };
+        return SamplerId { id: id };
     }
 
-    pub(crate) fn destroy_sampler(&self, sampler_id: SamplerID) {
-        let sampler = self.sampler_pool.write().unwrap().delete(sampler_id.id);
+    pub(crate) fn destroy_sampler(&self, sampler_id: SamplerId) {
+        let sampler = unsafe { (&mut *self.sampler_pool.get()).delete(sampler_id.id) };
 
         unsafe {
             self.handle.destroy_sampler(sampler.handle, None);
@@ -507,15 +525,13 @@ impl InnerDevice {
 // Descriptor //
 impl InnerDevice {
     pub(crate) fn write_buffer(&self, buffer_write_info: &BufferWriteInfo) {
-        let buffer_pool = self.buffer_pool.read().unwrap();
-        let buffer = buffer_pool.get_ref(buffer_write_info.buffer.id);
+        let buffer = unsafe { (&mut *self.buffer_pool.get()).get_ref(buffer_write_info.buffer.id) };
 
-        self.bindless_descriptors.write_buffer(&self.handle, buffer.handle, buffer_write_info.index);
+        self.bindless_descriptors.write_buffer(buffer.address, buffer_write_info.index);
     }
 
     pub(crate) fn write_image(&self, image_write_info: &ImageWriteInfo) {
-        let img_view_pool = self.image_view_pool.read().unwrap();
-        let img_view = img_view_pool.get_ref(image_write_info.view.id);
+        let img_view = unsafe { (&mut *self.image_view_pool.get()).get_ref(image_write_info.view.id) };
 
         match image_write_info.image_descriptor_type {
             ImageDescriptorType::SampledImage => self.bindless_descriptors.write_sampled_image(&self.handle, img_view.handle, image_write_info.index),
@@ -524,8 +540,7 @@ impl InnerDevice {
     }
 
     pub(crate) fn write_sampler(&self, sampler_write_info: &SamplerWriteInfo) {
-        let sampler_pool = self.sampler_pool.read().unwrap();
-        let sampler = sampler_pool.get_ref(sampler_write_info.sampler.id);
+        let sampler = unsafe { (&mut *self.sampler_pool.get()).get_ref(sampler_write_info.sampler.id) };
 
         self.bindless_descriptors.write_sampler(&self.handle, sampler.handle, sampler_write_info.index);
     }
@@ -601,23 +616,13 @@ impl InnerDevice {
         let signal_infos: Vec<vk::SemaphoreSubmitInfo> = submit_info
             .signal_semaphores
             .iter()
-            .map(|s| {
-                vk::SemaphoreSubmitInfo::default()
-                    .semaphore(s.semaphore.handle())
-                    .stage_mask(s.pipeline_stage.to_vk())
-                    .value(s.value.unwrap_or(0))
-            })
+            .map(|s| vk::SemaphoreSubmitInfo::default().semaphore(s.semaphore.handle()).stage_mask(s.pipeline_stage.to_vk()).value(s.value.unwrap_or(0)))
             .collect();
 
         let wait_infos: Vec<vk::SemaphoreSubmitInfo> = submit_info
             .wait_semaphores
             .iter()
-            .map(|s| {
-                vk::SemaphoreSubmitInfo::default()
-                    .semaphore(s.semaphore.handle())
-                    .stage_mask(s.pipeline_stage.to_vk())
-                    .value(s.value.unwrap_or(0))
-            })
+            .map(|s| vk::SemaphoreSubmitInfo::default().semaphore(s.semaphore.handle()).stage_mask(s.pipeline_stage.to_vk()).value(s.value.unwrap_or(0)))
             .collect();
 
         let cmd_type = submit_info.command_buffers[0].queue_type;
@@ -677,9 +682,13 @@ impl InnerDevice {
 
 impl Drop for InnerDevice {
     fn drop(&mut self) {
-        self.bindless_descriptors.cleanup(&self.handle);
+        let buffer_pool = unsafe { &mut (*self.buffer_pool.get()) };
+        let image_pool = unsafe { &mut (*self.image_pool.get()) };
+        let image_view_pool = unsafe { &mut (*self.image_view_pool.get()) };
+        let sampler_pool = unsafe { &mut (*self.sampler_pool.get()) };
 
         unsafe {
+            self.bindless_descriptors.cleanup(&self.handle, &mut (*self.allocator.get()));
             std::ptr::drop_in_place(&mut self.allocator);
             self.handle.destroy_device(None);
         }

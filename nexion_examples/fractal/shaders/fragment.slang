@@ -35,12 +35,10 @@ float mandelbulbDE(float3 p) {
     if (r > 4.0)
       break;
 
-    // Convert to polar coordinates
     float theta = acos(z.z / r);
     float phi = atan2(z.y, z.x);
     dr = pow(r, Power - 1.0) * Power * dr + 1.0;
 
-    // Scale and rotate the point
     float zr = pow(r, Power);
     theta *= Power;
     phi *= Power;

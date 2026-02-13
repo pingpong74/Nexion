@@ -1,12 +1,12 @@
 use ash::vk;
-use crossbeam::queue::ArrayQueue;
 use gpu_allocator::vulkan::Allocation;
+use std::cell::{Cell, UnsafeCell};
+use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 
-use crate::{ImageID, ImageViewID, Semaphore, SwapchainDescription};
+use crate::{AcquiredImage, Fence, ImageId, ImageViewId, Semaphore, SwapchainDescription};
 
 use crate::backend::device::InnerDevice;
 
@@ -51,17 +51,25 @@ pub(crate) struct InnerSwapchain {
     pub(crate) swapchain_loader: ash::khr::swapchain::Device,
     pub(crate) handle: vk::SwapchainKHR,
     pub(crate) desc: SwapchainDescription,
-    pub(crate) curr_img_indeices: ArrayQueue<u32>,
-    pub(crate) images: Vec<ImageID>,
-    pub(crate) image_views: Vec<ImageViewID>,
-    pub(crate) image_semaphore: Vec<Semaphore>,
-    pub(crate) preset_semaphore: Vec<Semaphore>,
-    pub(crate) timeline: AtomicUsize,
+    pub(crate) curr_img_indeices: UnsafeCell<VecDeque<u32>>,
+
+    // this is for per image
+    pub(crate) images: Vec<ImageId>,
+    pub(crate) image_views: Vec<ImageViewId>,
+    pub(crate) preset_semaphores: Vec<Semaphore>,
+
+    // this is for per frame
+    pub(crate) image_semaphores: Vec<Semaphore>,
+    pub(crate) fences: Vec<Fence>,
+    pub(crate) image_timeline: Cell<usize>,
+    pub(crate) frame_timeline: Cell<usize>,
     pub(crate) device: Arc<InnerDevice>,
 }
 
 impl InnerSwapchain {
     pub(crate) fn new(device: Arc<InnerDevice>, surface: &Surface, swapchain_description: &SwapchainDescription, old_swapchain: Option<Arc<InnerSwapchain>>) -> InnerSwapchain {
+        assert!(swapchain_description.frames_in_flight <= swapchain_description.image_count as usize);
+
         let swapchain_loader = ash::khr::swapchain::Device::new(&device.instance.handle, &device.handle);
 
         let support = surface.get_swapchain_support(device.physical_device.handle).expect("Swapchain not supported!!");
@@ -88,12 +96,8 @@ impl InnerSwapchain {
                 support.capabilities.current_extent
             } else {
                 vk::Extent2D {
-                    width: swapchain_description
-                        .width
-                        .clamp(support.capabilities.min_image_extent.width, support.capabilities.max_image_extent.width),
-                    height: swapchain_description
-                        .height
-                        .clamp(support.capabilities.min_image_extent.height, support.capabilities.max_image_extent.height),
+                    width: swapchain_description.width.clamp(support.capabilities.min_image_extent.width, support.capabilities.max_image_extent.width),
+                    height: swapchain_description.height.clamp(support.capabilities.min_image_extent.height, support.capabilities.max_image_extent.height),
                 }
             }
         };
@@ -105,7 +109,7 @@ impl InnerSwapchain {
             .image_color_space(surface_format.color_space)
             .image_extent(extent)
             .image_array_layers(1)
-            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST)
             .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
             .pre_transform(support.capabilities.current_transform)
             .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
@@ -120,47 +124,57 @@ impl InnerSwapchain {
 
         let images = unsafe { swapchain_loader.get_swapchain_images(swapchain).expect("Failed to get swapchain images") };
 
-        let image_ids: Vec<ImageID> = images
+        let image_ids: Vec<ImageId> = images
             .iter()
             .map(|&image| {
-                let id = device.image_pool.write().unwrap().add(crate::backend::gpu_resources::ImageSlot {
-                    handle: image,
-                    allocation: Allocation::default(),
-                    format: surface_format.format,
-                });
+                let id = unsafe {
+                    (&mut *device.image_pool.get()).add(crate::backend::gpu_resources::ImageSlot {
+                        handle: image,
+                        allocation: Allocation::default(),
+                        format: surface_format.format,
+                    })
+                };
 
-                ImageID { id: id }
+                ImageId { id: id }
             })
             .collect();
 
-        let image_views: Vec<ImageViewID> = image_ids.iter().map(|&image_id| device.create_image_view(image_id, &crate::ImageViewDescription::default())).collect();
+        let image_views: Vec<ImageViewId> = image_ids.iter().map(|&image_id| device.create_image_view(image_id, &crate::ImageViewDescription::default())).collect();
 
-        let (image_semapgores, present_semaphore) = {
+        let present_semaphore = {
             let mut t: Vec<Semaphore> = vec![];
-            let mut n: Vec<Semaphore> = vec![];
 
             for _ in 0..swapchain_description.image_count {
-                t.push(Semaphore::Binary(crate::BinarySemaphore {
-                    handle: device.create_binary_semaphore(),
-                }));
-                n.push(Semaphore::Binary(crate::BinarySemaphore {
-                    handle: device.create_binary_semaphore(),
-                }));
+                t.push(Semaphore::Binary(crate::BinarySemaphore { handle: device.create_binary_semaphore() }));
             }
 
-            (t, n)
+            t
+        };
+
+        let (image_semaphores, fences) = {
+            let mut t: Vec<Semaphore> = vec![];
+            let mut m: Vec<Fence> = vec![];
+
+            for _ in 0..swapchain_description.image_count {
+                t.push(Semaphore::Binary(crate::BinarySemaphore { handle: device.create_binary_semaphore() }));
+                m.push(Fence { handle: device.create_fence(true) });
+            }
+
+            (t, m)
         };
 
         return InnerSwapchain {
             handle: swapchain,
             swapchain_loader: swapchain_loader,
             desc: swapchain_description.clone(),
-            curr_img_indeices: ArrayQueue::new(swapchain_description.image_count as usize),
+            curr_img_indeices: UnsafeCell::new(VecDeque::with_capacity(swapchain_description.image_count as usize)),
             image_views: image_views,
             images: image_ids,
-            image_semaphore: image_semapgores,
-            preset_semaphore: present_semaphore,
-            timeline: AtomicUsize::new(0),
+            image_semaphores,
+            preset_semaphores: present_semaphore,
+            fences: fences,
+            image_timeline: Cell::new(0),
+            frame_timeline: Cell::new(0),
             device: device,
         };
     }
@@ -170,42 +184,32 @@ impl InnerSwapchain {
         let raw_display = window.display_handle().unwrap().as_raw();
 
         let surface_handle = match (raw_window, raw_display) {
-            // ---------------- Windows ----------------
             (RawWindowHandle::Win32(w), RawDisplayHandle::Windows(_)) => {
                 let info = ash::vk::Win32SurfaceCreateInfoKHR::default().hinstance(w.hinstance.unwrap().get()).hwnd(w.hwnd.get());
                 let loader = ash::khr::win32_surface::Instance::new(&device.instance.entry, &device.instance.handle);
                 unsafe { loader.create_win32_surface(&info, None).expect("Failed to create surface") }
             }
-
-            // ---------------- XCB ----------------
             (RawWindowHandle::Xcb(w), RawDisplayHandle::Xcb(d)) => {
                 let info = ash::vk::XcbSurfaceCreateInfoKHR::default().connection(d.connection.unwrap().as_ptr()).window(w.window.get());
                 let loader = ash::khr::xcb_surface::Instance::new(&device.instance.entry, &device.instance.handle);
                 unsafe { loader.create_xcb_surface(&info, None).expect("Failed to create surface") }
             }
-
-            // -------------- Xlib ----------------
             (RawWindowHandle::Xlib(w), RawDisplayHandle::Xlib(d)) => {
                 let info = ash::vk::XlibSurfaceCreateInfoKHR::default().dpy(d.display.unwrap().as_ptr() as *mut _).window(w.window);
                 let loader = ash::khr::xlib_surface::Instance::new(&device.instance.entry, &device.instance.handle);
                 unsafe { loader.create_xlib_surface(&info, None).expect("Failed to create surface") }
             }
-
-            // ---------------- Wayland ----------------
             (RawWindowHandle::Wayland(w), RawDisplayHandle::Wayland(d)) => {
                 let info = ash::vk::WaylandSurfaceCreateInfoKHR::default().display(d.display.as_ptr()).surface(w.surface.as_ptr());
                 let loader = ash::khr::wayland_surface::Instance::new(&device.instance.entry, &device.instance.handle);
                 unsafe { loader.create_wayland_surface(&info, None).expect("Failed to create surface") }
             }
-
-            // ---------------- macOS ----------------
             (RawWindowHandle::AppKit(w), RawDisplayHandle::AppKit(_)) => {
                 let info = ash::vk::MetalSurfaceCreateInfoEXT::default().layer(w.ns_view.as_ptr());
                 let loader = ash::ext::metal_surface::Instance::new(&device.instance.entry, &device.instance.handle);
                 unsafe { loader.create_metal_surface(&info, None).expect("Failed to create surface") }
             }
 
-            // ---------------- Unsupported ----------------
             _ => panic!("Unsupported platform or mismatched window/display handle"),
         };
 
@@ -217,32 +221,51 @@ impl InnerSwapchain {
 }
 
 impl InnerSwapchain {
-    pub(crate) fn acquire_image(&self) -> (ImageID, ImageViewID, Semaphore, Semaphore) {
-        let timeline_index = self.timeline.load(std::sync::atomic::Ordering::Relaxed);
-        let sem = self.image_semaphore[timeline_index];
+    pub(crate) fn acquire_image(&self) -> AcquiredImage {
+        let image_timeline = self.image_timeline.get();
+        let frame_timeline = self.frame_timeline.get();
 
-        let acquire_info = vk::AcquireNextImageInfoKHR::default().swapchain(self.handle).timeout(u64::MAX).semaphore(sem.handle()).device_mask(1);
+        let image_semaphore = self.image_semaphores[frame_timeline];
+        let fence = self.fences[frame_timeline];
 
-        let next_timeline_index = (timeline_index + 1) % self.image_semaphore.len();
-        self.timeline.store(next_timeline_index, std::sync::atomic::Ordering::Relaxed);
+        let (index, _) = unsafe {
+            self.device.handle.wait_for_fences(&[fence.handle], true, u64::MAX).expect("Failed to wait for in flight fence");
+            self.device.handle.reset_fences(&[fence.handle]).expect("Failed to reset in flight fence");
 
-        let (index, _) = unsafe { self.swapchain_loader.acquire_next_image2(&acquire_info).expect("Failed to acquire next image") };
+            let acquire_info = vk::AcquireNextImageInfoKHR::default().swapchain(self.handle).timeout(u64::MAX).semaphore(image_semaphore.handle()).device_mask(1);
+            self.swapchain_loader.acquire_next_image2(&acquire_info).expect("Failed to acquire next image")
+        };
 
-        self.curr_img_indeices.push(index).unwrap();
+        unsafe {
+            (&mut *self.curr_img_indeices.get()).push_back(index);
+        }
 
-        //println!("{} {}", timeline_index, index);
+        let next_timeline_index = (image_timeline + 1) % self.desc.image_count as usize;
+        self.image_timeline.replace(next_timeline_index);
 
-        return (self.images[index as usize], self.image_views[index as usize], sem, self.preset_semaphore[index as usize]);
+        let next_frame_timeline = (frame_timeline + 1) % self.desc.frames_in_flight;
+        self.frame_timeline.replace(next_frame_timeline);
+
+        return AcquiredImage {
+            image: self.images[index as usize],
+            view: self.image_views[index as usize],
+            image_semaphore: image_semaphore,
+            present_semaphore: self.preset_semaphores[index as usize],
+            fence: fence,
+            curr_frame: frame_timeline,
+        };
     }
 
     pub(crate) fn present(&self) {
-        let index = match self.curr_img_indeices.pop() {
-            Some(i) => i,
-            _ => {
-                return;
+        let index = unsafe {
+            match (&mut *self.curr_img_indeices.get()).pop_back() {
+                Some(i) => i,
+                _ => {
+                    return;
+                }
             }
         };
-        let sem = [self.preset_semaphore[index as usize].handle()];
+        let sem = [self.preset_semaphores[index as usize].handle()];
         let handle = [self.handle];
         let index = [index];
 
@@ -256,9 +279,15 @@ impl InnerSwapchain {
 
 impl Drop for InnerSwapchain {
     fn drop(&mut self) {
+        self.device.wait_idle();
         for i in 0..self.image_views.len() {
-            self.device.image_pool.write().unwrap().delete(self.images[i].id);
+            unsafe {
+                (&mut *self.device.image_pool.get()).delete(self.images[i].id);
+            };
             self.device.destroy_image_view(self.image_views[i]);
+            self.device.destroy_semaphore(self.image_semaphores[i]);
+            self.device.destroy_semaphore(self.preset_semaphores[i]);
+            self.device.destroy_fence(self.fences[i]);
         }
 
         unsafe {

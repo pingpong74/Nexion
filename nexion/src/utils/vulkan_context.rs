@@ -5,10 +5,9 @@ use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 #[allow(unused)]
 #[derive(Clone)]
 pub struct VulkanContext {
-    instance: Instance,
-    device: Device,
-    swapchain: Swapchain,
-    pipeline_manager: PipelineManager,
+    pub instance: Instance,
+    pub device: Device,
+    pub swapchain: Swapchain,
     swapchain_description: SwapchainDescription,
 }
 
@@ -17,13 +16,11 @@ impl VulkanContext {
         let instance = Instance::new(window, instance_desc);
         let device = instance.create_device(device_desc);
         let swapchain = device.create_swapchain(window, swapchain_desc);
-        let pipeline_manager = device.create_pipeline_manager();
 
         return VulkanContext {
             instance: instance,
             device: device,
             swapchain: swapchain,
-            pipeline_manager: pipeline_manager,
             swapchain_description: swapchain_desc.clone(),
         };
     }
@@ -31,6 +28,7 @@ impl VulkanContext {
 
 impl VulkanContext {
     pub fn resize(&mut self, width: u32, height: u32) {
+        self.device.wait_idle();
         self.swapchain.recreate_swapchain(width, height);
     }
 }
@@ -39,22 +37,26 @@ impl VulkanContext {
     delegate! {
         to self.device {
             //Buffer
-            pub fn create_buffer(&self, buffer_desc: &BufferDescription) -> BufferID;
-            pub fn destroy_buffer(&self, id: BufferID);
-            pub fn write_data_to_buffer<T: Copy>(&self, buffer_id: BufferID, data: &[T]);
-            pub fn get_raw_ptr(&self, buffer_id: BufferID) -> *mut u8;
+            pub fn create_buffer(&self, buffer_desc: &BufferDescription) -> BufferId;
+            pub fn destroy_buffer(&self, id: BufferId);
+            pub fn write_data_to_buffer<T: Copy>(&self, buffer_id: BufferId, data: &[T]);
+            pub fn get_raw_ptr(&self, buffer_id: BufferId) -> *mut u8;
             //Image
-            pub fn create_image(&self, image_desc: &ImageDescription) -> ImageID;
-            pub fn destroy_image(&self, image_id: ImageID);
+            pub fn create_image(&self, image_desc: &ImageDescription) -> ImageId;
+            pub fn destroy_image(&self, image_id: ImageId);
             //Image view
-            pub fn create_image_view(&self, image_id: ImageID, image_view_desc: &ImageViewDescription) -> ImageViewID;
-            pub fn destroy_image_view(&self, image_view_id: ImageViewID);
+            pub fn create_image_view(&self, image_id: ImageId, image_view_desc: &ImageViewDescription) -> ImageViewId;
+            pub fn destroy_image_view(&self, image_view_id: ImageViewId);
             //Sampler
-            pub fn create_sampler(&self, sampler_desc: &SamplerDescription) -> SamplerID;
-            pub fn destroy_sampler(&self, sampler_id: SamplerID);
+            pub fn create_sampler(&self, sampler_desc: &SamplerDescription) -> SamplerId;
+            pub fn destroy_sampler(&self, sampler_id: SamplerId);
             //Texture
             pub fn create_texture(&self, image_desc: &ImageDescription, image_view_desc: &ImageViewDescription, index: u32) -> Texture;
             pub fn destory_texture(&self, texture: Texture);
+            // Pipeline
+            pub fn create_rasterization_pipeline(&self, raster_pipeline_desc: &RasterizationPipelineDescription) -> Pipeline;
+            pub fn create_compute_pipeline(&self, compute_pipeline_desc: &ComputePipelineDescription) -> Pipeline;
+            pub fn destroy_pipeline(&self, pipeline: Pipeline);
             // Descriptors
             pub fn write_buffer(&self, buffer_write_info: &BufferWriteInfo);
             pub fn write_image(&self, image_write_info: &ImageWriteInfo);
@@ -75,12 +77,8 @@ impl VulkanContext {
             pub fn wait_queue(&self, queue_type: QueueType);
         }
         to self.swapchain {
-            pub fn acquire_image(&self) -> (ImageID, ImageViewID, Semaphore, Semaphore);
+            pub fn acquire_image(&self) -> AcquiredImage;
             pub fn present(&self);
-        }
-        to self.pipeline_manager {
-            pub fn create_rasterization_pipeline(&self, raster_pipeline_desc: &RasterizationPipelineDescription) -> RasterizationPipeline;
-            pub fn create_compute_pipeline(&self, compute_pipeline_desc: &ComputePipelineDescription) -> ComputePipeline;
         }
     }
 }

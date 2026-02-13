@@ -1,4 +1,4 @@
-use std::u64::MAX;
+use std::{cell::UnsafeCell, u64::MAX};
 
 use ash::vk;
 use gpu_allocator::vulkan::*;
@@ -43,16 +43,16 @@ const PAGE_SIZE: usize = 10;
 ///
 /// Actual creation and destruction happens on a device, this just manages the ids
 
-pub(crate) struct GpuResourcePool<Resource> {
-    data: Vec<[(Option<Resource>, u64); PAGE_SIZE]>,
+pub(crate) struct ResourcePool<Resource> {
+    pub(crate) data: Vec<[(Option<Resource>, u64); PAGE_SIZE]>,
     free_indices: Vec<u64>,
     curr_page: usize,
     curr_index: usize,
 }
 
-impl<Resource> GpuResourcePool<Resource> {
+impl<Resource> ResourcePool<Resource> {
     pub(crate) fn new() -> Self {
-        return GpuResourcePool {
+        return ResourcePool {
             data: vec![std::array::from_fn(|_| (None, 0))],
             free_indices: Vec::new(),
             curr_index: 0,
@@ -129,22 +129,26 @@ impl<Resource> GpuResourcePool<Resource> {
 }
 
 /// Provides 4 resource types
-/// Storage Buffer        -> binding 0
-/// Sampled Image         -> binding 1
-/// Storage image         -> binding 2
-/// Sampler               -> binding 3
+/// Device Address Buffer        -> binding 0
+/// Sampled Image                -> binding 1
+/// Storage image                -> binding 2
+/// Sampler                      -> binding 3
 pub(crate) struct GpuBindlessDescriptorPool {
     pub(crate) pool: vk::DescriptorPool,
     pub(crate) set: vk::DescriptorSet,
     pub(crate) layout: vk::DescriptorSetLayout,
+    pub(crate) device_address_buffer: Option<BufferSlot>,
+
+    // pending writes
+    pub(crate) pending_buffers: UnsafeCell<Vec<u64>>,
 }
 
 impl GpuBindlessDescriptorPool {
-    pub(crate) fn new(device: &ash::Device, max_buffers: u32, max_storage_images: u32, max_sampled_images: u32, max_samplers: u32) -> GpuBindlessDescriptorPool {
+    pub(crate) fn new(device: &ash::Device, buffer: BufferSlot, max_storage_images: u32, max_sampled_images: u32, max_samplers: u32) -> GpuBindlessDescriptorPool {
         let pool_sizes = [
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::STORAGE_BUFFER,
-                descriptor_count: max_buffers,
+                descriptor_count: 1,
             },
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::STORAGE_IMAGE,
@@ -171,7 +175,7 @@ impl GpuBindlessDescriptorPool {
             vk::DescriptorSetLayoutBinding::default()
                 .binding(0)
                 .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .descriptor_count(max_buffers)
+                .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::ALL),
             vk::DescriptorSetLayoutBinding::default()
                 .binding(1)
@@ -206,7 +210,7 @@ impl GpuBindlessDescriptorPool {
 
         let bindless_set_layout = unsafe { device.create_descriptor_set_layout(&layout_info, None).expect("Failed to create bindless descriptor set layout") };
 
-        let variable_counts = [max_buffers];
+        let variable_counts = [max_samplers];
         let mut variable_count_info = vk::DescriptorSetVariableDescriptorCountAllocateInfo::default().descriptor_counts(&variable_counts);
 
         let alloc_info = vk::DescriptorSetAllocateInfo::default()
@@ -216,31 +220,39 @@ impl GpuBindlessDescriptorPool {
 
         let bindless_set = unsafe { device.allocate_descriptor_sets(&alloc_info).expect("Failed to create bindless descriptor") }[0];
 
-        return GpuBindlessDescriptorPool {
-            pool: descriptor_pool,
-            set: bindless_set,
-            layout: bindless_set_layout,
-        };
-    }
-
-    pub(crate) fn write_buffer(&self, device: &ash::Device, buffer: vk::Buffer, index: u32) {
         let buffer_info = [vk::DescriptorBufferInfo {
-            buffer: buffer,
+            buffer: buffer.handle,
             offset: 0,
-            range: MAX,
+            range: vk::WHOLE_SIZE,
         }];
 
         let write_info = [vk::WriteDescriptorSet::default()
             .buffer_info(&buffer_info)
-            .dst_set(self.set)
+            .dst_set(bindless_set)
             .dst_binding(0)
-            .dst_array_element(index)
+            .dst_array_element(0)
             .descriptor_count(1)
             .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)];
 
         unsafe {
             device.update_descriptor_sets(&write_info, &[]);
         }
+
+        return GpuBindlessDescriptorPool {
+            pool: descriptor_pool,
+            set: bindless_set,
+            layout: bindless_set_layout,
+            device_address_buffer: Some(buffer),
+            pending_buffers: UnsafeCell::new(vec![0; 100]),
+        };
+    }
+
+    pub(crate) fn write_buffer(&self, device_address: u64, index: u32) {
+        assert!(index < 100);
+
+        unsafe {
+            (&mut (*self.pending_buffers.get()))[index as usize] = device_address;
+        };
     }
 
     pub(crate) fn write_sampled_image(&self, device: &ash::Device, image_view: vk::ImageView, index: u32) {
@@ -309,8 +321,20 @@ impl GpuBindlessDescriptorPool {
         }
     }
 
-    pub(crate) fn cleanup(&mut self, device: &ash::Device) {
+    pub(crate) fn get_addresses(&self) -> &[u8] {
         unsafe {
+            let ptr = *(&(*self.pending_buffers.get()).as_ptr()) as *const u8;
+            let len = &(*self.pending_buffers.get()).len() * 64;
+            return std::slice::from_raw_parts(ptr, len);
+        }
+    }
+
+    pub(crate) fn cleanup(&mut self, device: &ash::Device, allocator: &mut Allocator) {
+        unsafe {
+            let buffer = self.device_address_buffer.take().unwrap();
+            allocator.free(buffer.allocation).expect("Failed to deallocate buffer");
+            device.destroy_buffer(buffer.handle, None);
+
             device.destroy_descriptor_set_layout(self.layout, None);
             device.destroy_descriptor_pool(self.pool, None);
         }

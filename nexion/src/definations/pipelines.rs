@@ -1,12 +1,13 @@
 use crate::*;
-use crate::{BufferID, ImageViewID, SamplerID};
+use crate::{BufferId, ImageViewId, SamplerId};
 use ash::vk;
+use std::ops::BitAnd;
 use std::{ops::BitOr, u64};
 
 ////Descriptors////
 
 pub struct BufferWriteInfo {
-    pub buffer: BufferID,
+    pub buffer: BufferId,
     pub offset: u64,
     pub range: u64,
     pub index: u32,
@@ -15,7 +16,7 @@ pub struct BufferWriteInfo {
 impl Default for BufferWriteInfo {
     fn default() -> Self {
         return BufferWriteInfo {
-            buffer: BufferID::null(),
+            buffer: BufferId::null(),
             offset: 0,
             range: 0,
             index: 0,
@@ -29,7 +30,7 @@ pub enum ImageDescriptorType {
 }
 
 pub struct ImageWriteInfo {
-    pub view: ImageViewID,
+    pub view: ImageViewId,
     pub image_descriptor_type: ImageDescriptorType,
     pub index: u32,
 }
@@ -37,7 +38,7 @@ pub struct ImageWriteInfo {
 impl Default for ImageWriteInfo {
     fn default() -> Self {
         return ImageWriteInfo {
-            view: ImageViewID::null(),
+            view: ImageViewId::null(),
             image_descriptor_type: ImageDescriptorType::SampledImage,
             index: 0,
         };
@@ -45,13 +46,13 @@ impl Default for ImageWriteInfo {
 }
 
 pub struct SamplerWriteInfo {
-    pub sampler: SamplerID,
+    pub sampler: SamplerId,
     pub index: u32,
 }
 
 impl Default for SamplerWriteInfo {
     fn default() -> Self {
-        return SamplerWriteInfo { sampler: SamplerID::null(), index: 0 };
+        return SamplerWriteInfo { sampler: SamplerId::null(), index: 0 };
     }
 }
 
@@ -119,10 +120,7 @@ pub struct VertexInputDescription {
 
 impl Default for VertexInputDescription {
     fn default() -> Self {
-        return Self {
-            bindings: Vec::new(),
-            attributes: Vec::new(),
-        };
+        return Self { bindings: Vec::new(), attributes: Vec::new() };
     }
 }
 
@@ -243,7 +241,7 @@ impl<'a> Default for PipelineOutputs<'a> {
 }
 
 #[derive(Clone, Copy)]
-pub struct ShaderStages(pub vk::ShaderStageFlags);
+pub struct ShaderStages(pub(crate) vk::ShaderStageFlags);
 
 impl ShaderStages {
     pub const VERTEX: Self = Self(vk::ShaderStageFlags::VERTEX);
@@ -259,6 +257,21 @@ impl ShaderStages {
     pub fn to_vk(self) -> vk::ShaderStageFlags {
         self.0
     }
+
+    pub const fn const_or(self, other: Self) -> Self {
+        return Self(vk::ShaderStageFlags::from_raw(self.0.as_raw() | other.0.as_raw()));
+    }
+
+    pub const fn const_and(self, other: Self) -> Self {
+        return Self(vk::ShaderStageFlags::from_raw(self.0.as_raw() & other.0.as_raw()));
+    }
+}
+
+impl BitOr for ShaderStages {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -273,13 +286,6 @@ impl InputTopology {
             InputTopology::TriangleList => vk::PrimitiveTopology::TRIANGLE_LIST,
             InputTopology::PointList => vk::PrimitiveTopology::POINT_LIST,
         }
-    }
-}
-
-impl BitOr for ShaderStages {
-    type Output = Self;
-    fn bitor(self, rhs: Self) -> Self {
-        Self(self.0 | rhs.0)
     }
 }
 
@@ -302,15 +308,8 @@ impl Default for PushConstantsDescription {
 
 #[derive(Clone)]
 pub enum GeometryStage<'a> {
-    Classic {
-        vertex_input: VertexInputDescription,
-        topology: InputTopology,
-        vertex_shader: &'a str,
-    },
-    Mesh {
-        task_shader: Option<&'a str>,
-        mesh_shader: &'a str,
-    },
+    Classic { vertex_input: VertexInputDescription, topology: InputTopology, vertex_shader: &'a str },
+    Mesh { task_shader: Option<&'a str>, mesh_shader: &'a str },
 }
 
 #[derive(Clone)]

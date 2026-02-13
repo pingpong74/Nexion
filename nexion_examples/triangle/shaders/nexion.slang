@@ -7,51 +7,10 @@ namespace nexion {
 // Read only Buffers
 // -----------------------------------------
 [[vk::binding(0, 0)]]
-ByteAddressBuffer ro_buffers[];
+StructuredBuffer<uint64_t> device_address_buffer;
 
-/// This is read only buffer type
-public struct ReadOnlyBuffer<T> {
-  public ByteAddressBuffer raw_buffer;
-
-  public static inline const ReadOnlyBuffer<T> get_buffer(uint index) {
-    return { ro_buffers[index] };
-  }
-  public __subscript(uint index)->T {
-    get { return raw_buffer.Load<T>(index * sizeof(T)); }
-  }
-}
-
-// -----------------------------------------
-// Read write buffers
-// -----------------------------------------
-[[vk::binding(0, 0)]]
-RWByteAddressBuffer rw_buffers[];
-
-[[vk::binding(0, 0)]]
-coherent RWByteAddressBuffer rw_coherent_buffers[];
-
-public struct ReadWriteBuffer<T> {
-  public RWByteAddressBuffer raw_buffer;
-
-  public static inline ReadWriteBuffer<T> get_buffer(uint index) {
-    return { rw_buffers[index] };
-  }
-
-  public static inline ReadWriteBuffer<T> get_coherent_buffer(uint index) {
-    return { rw_coherent_buffers[index] };
-  }
-
-  public const inline T load(uint id) {
-    return raw_buffer.Load<T>(id * sizeof(T));
-  }
-
-  public inline void store(uint id, T new_value) {
-    raw_buffer.Store<T>(id * sizeof(T), new_value);
-  }
-
-  public inline void atomic_add_f32(uint id, float val) {
-    raw_buffer.InterlockedAddF32(id * 4, val);
-  }
+public uint64_t get_buffer_address(uint index) {
+  return device_address_buffer.Load(index);
 }
 
 //----------------
@@ -83,11 +42,11 @@ public SamplerState get_sampler(uint index) { return nexion::samplers[index]; }
   RWTexture1D<TYPE> rw_images_1d_##TYPE[];
 
 #define DECLARE_RW_IMGS_2D(TYPE)                                               \
-  [[vk::binding(1, 0)]]                                                        \
+  [[vk::binding(2, 0)]]                                                        \
   RWTexture2D<TYPE> rw_images_2d_##TYPE[];
 
 #define DECLARE_RW_IMGS_3D(TYPE)                                               \
-  [[vk::binding(1, 0)]]                                                        \
+  [[vk::binding(2, 0)]]                                                        \
   RWTexture3D<TYPE> rw_images_3d_##TYPE[];
 
 #define GET_SAMPLED_IMG_1D(TYPE, index) nexion::sampled_images_1d_##TYPE[index]
@@ -95,6 +54,10 @@ public SamplerState get_sampler(uint index) { return nexion::samplers[index]; }
 #define GET_SAMPLED_IMG_3D(TYPE, index) nexion::sampled_images_3d_##TYPE[index]
 #define GET_SAMPLED_IMG_CUBE(TYPE, index)                                      \
   nexion::sampled_images_cube_##TYPE[index]
+
+#define GET_STORAGE_IMAGE_1D(TYPE, index) nexion::rw_images_1d_##TYPE[index];
+#define GET_STORAGE_IMAGE_2D(TYPE, index) nexion::rw_images_2d_##TYPE[index];
+#define GET_STORAGE_IMAGE_3D(TYPE, index) nexion::rw_images_3d_##TYPE[index];
 
 // -----------------------------------------
 // Sampled images
